@@ -1,33 +1,44 @@
-from fastapi import FastAPI, HTTPException, status
-from app.security import generate_jwt, hash_password, verify_password
-from app.schemas import RegisterDto, LoginDto, TokenOut
+from flask import Flask, request, jsonify
+from app.security import hash_password, verify_password, generate_jwt
 
-app = FastAPI()
+app = Flask(__name__)
 
-# "banco" em memória para testes
-USERS: dict[str, dict] = {}
+USERS = {}
 
 @app.get("/auth/health")
 def health():
     return {"status": "ok", "service": "auth"}
 
-@app.post("/auth/register", status_code=status.HTTP_201_CREATED)
-def register(data: RegisterDto):
-    email = data.email.lower()
-    if email in USERS:
-        raise HTTPException(status_code=409, detail="email already registered")
+@app.post("/auth/register")
+def register():
+    data = request.json
+    email = data["email"]
+    password = data["password"]
+    name = data.get("name", "")
+
+    hashed = hash_password(password)
+    
     USERS[email] = {
         "name": data.name or "",
         "email": email,
-        "password_hash": hash_password(data.password),
+        "password_hash": hashed,
+        "name": name
     }
-    return {"email": email, "name": USERS[email]["name"]}
 
-@app.post("/auth/login", response_model=TokenOut)
-def login(data: LoginDto):
-    email = data.email.lower()
+    return {"email": email}, 201
+
+@app.post("/auth/login")
+def login():
+    data = request.json
+    email = data["email"]
+    password = data["password"]
+
     user = USERS.get(email)
-    if not user or not verify_password(data.password, user["password_hash"]):
-        raise HTTPException(status_code=401, detail="invalid credentials")
-    token = generate_jwt(sub=email, email=email, name=user["name"])
+    if not user:
+        return {"error": "invalid credentials"}, 401
+    
+    if not verify_password(password, user["password_hash"]):
+        return {"error": "invalid credentials"}, 401
+
+    token = generate_jwt(email, email, user["name"])
     return {"access_token": token, "token_type": "Bearer"}
