@@ -20,7 +20,6 @@ def register():
     
     USERS[email] = {
         "name": data.name or "",
-        "email": email,
         "password_hash": hashed,
         "name": name
     }
