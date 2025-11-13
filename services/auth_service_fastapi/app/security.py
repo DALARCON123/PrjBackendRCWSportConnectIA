@@ -1,28 +1,31 @@
-import os, datetime, jwt
-from passlib.context import CryptContext
+# app/security.py
+import bcrypt
+import jwt
+import datetime
+import os
 
-JWT_SECRET = os.getenv("JWT_SECRET", "changeme-super-secret")
-JWT_ISSUER = os.getenv("JWT_ISSUER", "rcw.sport")
-JWT_AUDIENCE = os.getenv("JWT_AUDIENCE", "rcw.sport.clients")
-JWT_EXPIRES_HOURS = int(os.getenv("JWT_EXPIRES_HOURS", "4"))
+JWT_SECRET = os.getenv("JWT_SECRET", "change-me")
+JWT_ALG = os.getenv("JWT_ALGORITHM", "HS256")
+ACCESS_MIN = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+def hash_password(password: str) -> str:
+    salt = bcrypt.gensalt(rounds=12)
+    return bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
 
-def hash_password(raw: str) -> str:
-    return pwd_context.hash(raw)
+def verify_password(plain: str, hashed: str) -> bool:
+    try:
+        return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    except Exception:
+        return False
 
-def verify_password(raw: str, hashed: str) -> bool:
-    return pwd_context.verify(raw, hashed)
-
-def generate_jwt(sub: str, email: str, name: str | None) -> str:
+def generate_jwt(sub: str, email: str, name: str) -> str:
     now = datetime.datetime.utcnow()
     payload = {
-        "iss": JWT_ISSUER,
-        "aud": JWT_AUDIENCE,
-        "iat": now,
-        "exp": now + datetime.timedelta(hours=JWT_EXPIRES_HOURS),
         "sub": sub,
         "email": email,
-        "name": name or "",
+        "name": name,
+        "iat": now,
+        "exp": now + datetime.timedelta(minutes=ACCESS_MIN),
+        "iss": os.getenv("APP_NAME", "AuthService"),
     }
-    return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)

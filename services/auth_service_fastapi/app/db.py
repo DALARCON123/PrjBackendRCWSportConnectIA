@@ -1,21 +1,20 @@
-import os
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
+import sqlite3
+from pathlib import Path
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-USE_INMEMORY = os.getenv("USE_INMEMORY", "false").lower() == "true"
+DB_PATH = Path(__file__).resolve().parent.parent / "auth.db"
 
-if not DATABASE_URL or USE_INMEMORY:
-    DATABASE_URL = "sqlite:///./auth.db"
+def get_conn():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
 
-connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
-engine = create_engine(DATABASE_URL, echo=False, future=True, connect_args=connect_args)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, future=True)
-Base = declarative_base()
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+def init_db():
+    with get_conn() as c:
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            email TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            password_hash TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
