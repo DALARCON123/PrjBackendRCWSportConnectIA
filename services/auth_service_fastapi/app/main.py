@@ -3,10 +3,20 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
+from pathlib import Path
+import os
+
+# =========================
+#   Cargar .env de la raíz
+#   .../PrjBackendRCWSportConnectIA/.env
+# =========================
+ROOT_ENV = Path(__file__).resolve().parents[3] / ".env"
+load_dotenv(ROOT_ENV)
 
 from .security import hash_password, verify_password, generate_jwt
 
-load_dotenv()  # carga .env si existe
+# Leer puerto (soporta AUTH_PORT o PORT por si quedó antiguo)
+AUTH_PORT = int(os.getenv("AUTH_PORT") or os.getenv("PORT", "8001"))
 
 app = FastAPI(title="Auth Service")
 
@@ -32,15 +42,18 @@ class RegisterIn(BaseModel):
     password: str
     name: str | None = ""
 
+
 class LoginIn(BaseModel):
     email: str
     password: str
+
 
 class TokenOut(BaseModel):
     access_token: str
     token_type: str = "Bearer"
 
-# Base de datos en memoria (por ahora)
+
+# Por ahora base de usuarios en memoria
 USERS: dict[str, dict] = {}
 
 
@@ -88,4 +101,4 @@ def login(body: LoginIn):
 # Solo para ejecutar directamente este servicio
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8001, reload=True)
+    uvicorn.run("app.main:app", host="0.0.0.0", port=AUTH_PORT, reload=True)

@@ -1,5 +1,7 @@
+# services/chatbot_service_fastapi/app/main.py
 import os
 from typing import Optional
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,7 +9,11 @@ from pydantic import BaseModel
 import httpx
 from dotenv import load_dotenv
 
-load_dotenv()
+# =========================
+#   Cargar .env de la raíz
+# =========================
+ROOT_ENV = Path(__file__).resolve().parents[3] / ".env"
+load_dotenv(ROOT_ENV)
 
 app = FastAPI(title="ChatbotService")
 
@@ -37,11 +43,14 @@ MAX_RESPONSE_TOKENS = int(os.getenv("MAX_RESPONSE_TOKENS", "500"))
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.7"))
 TOP_P = float(os.getenv("TOP_P", "0.9"))
 
-PORT = int(os.getenv("PORT", "8010"))
+CHAT_PORT = int(os.getenv("CHAT_PORT") or os.getenv("PORT", "8010"))
 
-print(f"HF Router -> model: {HF_MODEL} | token_len: {len(HF_API_TOKEN) if HF_API_TOKEN else 0}")
+print(
+    f"HF Router -> model: {HF_MODEL} | token_len: "
+    f"{len(HF_API_TOKEN) if HF_API_TOKEN else 0}"
+)
 if not HF_API_TOKEN:
-    print("HF_API_TOKEN no está configurado, solo se usará el fallback local.")
+    print("HF_API_TOKEN no está configurada, solo se usará el fallback local.")
 
 
 class AskRequest(BaseModel):
@@ -53,7 +62,7 @@ class AskRequest(BaseModel):
 @app.get("/chat/health")
 async def health():
     return {"status": "ok", "service": "chat"}
-
+    
 
 SYSTEM_PROMPT = (
     "Eres un coach deportivo conciso, claro e inclusivo. "
@@ -90,9 +99,15 @@ def fallback_answer(msg: str, lang: str) -> str:
         )
 
     if lang.startswith("es"):
-        return "Cuéntame tu objetivo (salud, fuerza, peso, tiempo disponible) y armamos un plan rápido 😊"
+        return (
+            "Cuéntame tu objetivo (salud, fuerza, peso, tiempo disponible) "
+            "y armamos un plan rápido 😊"
+        )
     if lang.startswith("fr"):
-        return "Dis-moi ton objectif (santé, force, poids, temps disponible) et on crée un plan rapide 😊"
+        return (
+            "Dis-moi ton objectif (santé, force, poids, temps disponible) "
+            "et on crée un plan rapide 😊"
+        )
     return "Tell me your goal (health, strength, weight, time) and we’ll create a quick plan 😊"
 
 
@@ -100,7 +115,6 @@ def fallback_answer(msg: str, lang: str) -> str:
 #  Llamada al Router HF
 # ============================
 async def call_huggingface(question: str, lang: str) -> str:
-    # Llama al Router de Hugging Face (Inference Providers, chat-completion)
     if not HF_API_TOKEN:
         return ""
 
@@ -158,7 +172,7 @@ async def ask(req: AskRequest):
     # 1) Intentar con modelo avanzado de HF
     answer = await call_huggingface(msg, lang)
 
-    # 2) Si falla o viene vacío → usamos fallback local
+    # 2) Si falla o viene vacío → fallback local
     if not answer or not answer.strip():
         answer = fallback_answer(msg, lang)
 
@@ -167,5 +181,4 @@ async def ask(req: AskRequest):
 
 if __name__ == "__main__":
     import uvicorn
-
-    uvicorn.run("app.main:app", host="0.0.0.0", port=PORT, reload=True)
+    uvicorn.run("app.main:app", host="0.0.0.0", port=CHAT_PORT, reload=True)
