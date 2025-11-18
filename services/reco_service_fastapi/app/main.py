@@ -8,18 +8,21 @@ from dotenv import load_dotenv
 import os
 import httpx
 
+from .tracking_db import init_db, get_conn  # tracking SQLite
+from .firebase_client import db, fb_firestore  # Firestore (Firebase)
+
 # =========================
 #   Cargar .env de la raíz
 # =========================
 ROOT_ENV = Path(__file__).resolve().parents[3] / ".env"
 load_dotenv(ROOT_ENV)
 
-from .tracking_db import init_db, get_conn  # tracking SQLite
-from .firebase_client import db, fb_firestore  # Firestore (Firebase)
-
 RECO_PORT = int(os.getenv("RECO_PORT") or os.getenv("PORT", "8003"))
 CHATBOT_URL = os.getenv("CHATBOT_URL", "http://localhost:8010/chat/ask").rstrip("/")
 
+# =========================
+#   Crear app FastAPI
+# =========================
 app = FastAPI(title="Reco Service")
 
 # CORS para el frontend Vite

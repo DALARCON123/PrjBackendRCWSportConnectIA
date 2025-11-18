@@ -70,7 +70,7 @@ async def health():
 SYSTEM_PROMPT = (
     "Eres el Assistant Coach IA de SportConnectIA. "
     "Solo puedes responder sobre SALUD, ALIMENTACIÓN SANA, NUTRICIÓN, "
-    "DEPORTE, ENTRENAMIENTO FÍSICO, RECUPERACIÓN, MOTIVACIÓN DEPORTIVA "
+    "DEPORTE, ENTRENAMIENTO FÍSICO, YOGA, RECUPERACIÓN, MOTIVACIÓN DEPORTIVA "
     "y EVENTOS/COMPETICIONES DEPORTIVAS. "
     "Tu principal misión es ayudar a la persona a entrenar mejor y llevar "
     "un estilo de vida saludable. "
@@ -87,7 +87,7 @@ SYSTEM_PROMPT = (
     "la salud en caso de dolor, enfermedad o condición médica. "
     "Si la pregunta no está relacionada con esos temas, debes negarte "
     "amablemente en UNA o DOS frases y pedir que reformule una pregunta "
-    "sobre deporte, salud o nutrición. "
+    "sobre deporte, salud, nutrición o yoga. "
     "Sé conciso, claro e inclusivo y responde SIEMPRE en el idioma del usuario."
 )
 
@@ -142,7 +142,7 @@ def fallback_answer(msg: str, lang: str) -> str:
         w in m
         for w in [
             "deporte", "ejercicio", "sport", "exercise", "entrenar",
-            "training", "entrenamiento", "rutina", "plan"
+            "training", "entrenamiento", "rutina", "plan", "yoga"
         ]
     ):
         if lang.startswith("es"):
@@ -150,9 +150,12 @@ def fallback_answer(msg: str, lang: str) -> str:
                 "Puedes empezar hoy con una caminata ligera de 20–30 minutos, "
                 "un poco de movilidad articular y 2–3 series de sentadillas, "
                 "plancha y puente de glúteos (10–12 repeticiones). "
+                "Si te interesa el yoga, comienza con 10–15 minutos de posturas "
+                "suaves (como el perro boca abajo, el gato-vaca y la postura del niño) "
+                "y enfócate en respirar de forma lenta y profunda. "
                 "Acompáñalo con agua, frutas, verduras y proteínas magras. "
                 "Cuéntame tu nivel (principiante, intermedio), tu objetivo "
-                "(bajar de peso, ganar músculo, salud) y cuántos días puedes "
+                "(bajar de peso, ganar músculo, salud, flexibilidad) y cuántos días puedes "
                 "entrenar a la semana para afinar mejor tu rutina 😊"
             )
         if lang.startswith("fr"):
@@ -160,32 +163,40 @@ def fallback_answer(msg: str, lang: str) -> str:
                 "Commence par 20–30 minutes de marche, un peu de mobilité, "
                 "puis 2–3 séries de squats, planche et pont fessier "
                 "(10–12 répétitions). "
+                "Si tu t'intéresses au yoga, démarre avec 10–15 minutes de postures "
+                "douces (chien tête en bas, chat-vache, posture de l’enfant) "
+                "en respirant calmement. "
                 "Ajoute beaucoup d’eau, des fruits, des légumes et des "
                 "protéines maigres. "
                 "Dis-moi ton niveau (débutant, intermédiaire), ton objectif "
-                "(perte de poids, prise de muscle, santé) et le nombre de "
+                "(perte de poids, prise de muscle, santé, souplesse) et le nombre de "
                 "jours par semaine pour personnaliser ta routine 😊"
             )
         return (
             "You can start with a 20–30 minute light walk, some mobility work, "
             "and 2–3 sets of squats, plank and glute bridge (10–12 reps). "
+            "If you are interested in yoga, begin with 10–15 minutes of gentle "
+            "poses (like downward dog, cat-cow and child’s pose) with slow breathing. "
             "Combine it with water, fruits, vegetables and lean protein. "
             "Tell me your level (beginner, intermediate), your goal "
-            "(fat loss, muscle gain, health) and how many days per week you "
+            "(fat loss, muscle gain, health, flexibility) and how many days per week you "
             "can train so I can personalize your routine 😊"
         )
 
     if lang.startswith("es"):
         return (
-            "Cuéntame tu objetivo (salud, fuerza, peso, tiempo disponible) "
+            "Cuéntame tu objetivo (salud, fuerza, peso, yoga, tiempo disponible) "
             "y armamos un plan rápido 😊"
         )
     if lang.startswith("fr"):
         return (
-            "Dis-moi ton objectif (santé, force, poids, temps disponible) "
+            "Dis-moi ton objectif (santé, force, poids, yoga, temps disponible) "
             "et on crée un plan rapide 😊"
         )
-    return "Tell me your goal (health, strength, weight, time) and we’ll create a quick plan 😊"
+    return (
+        "Tell me your goal (health, strength, weight, yoga, time) "
+        "and we’ll create a quick plan 😊"
+    )
 
 
 # ============================
@@ -246,7 +257,7 @@ async def ask(req: AskRequest):
     if not msg:
         return {"answer": ""}
 
-    # --- 1) Filtro de dominio: solo salud/deporte/nutrición ---
+    # --- 1) Filtro de dominio ---
     if not is_allowed_question(msg):
         if lang.startswith("fr"):
             return {
@@ -254,7 +265,7 @@ async def ask(req: AskRequest):
                     "Je suis l’Assistant Coach IA de SportConnectIA. "
                     "Je peux seulement répondre sur la santé, "
                     "l’alimentation saine, la nutrition sportive, "
-                    "l’entraînement ou des événements sportifs. "
+                    "l’entraînement, le yoga ou des événements sportifs. "
                     "Peux-tu reformuler ta question dans ce domaine ? 🙂"
                 )
             }
@@ -263,20 +274,20 @@ async def ask(req: AskRequest):
                 "answer": (
                     "Soy el Assistant Coach IA de SportConnectIA. "
                     "Solo puedo responder sobre salud, alimentación sana, "
-                    "nutrición deportiva, entrenamiento o eventos deportivos. "
+                    "nutrición deportiva, entrenamiento, yoga o eventos deportivos. "
                     "Por favor, reformula tu pregunta en ese tema 🙂"
                 )
             }
         return {
             "answer": (
                 "I am the SportConnectIA Assistant Coach. I can only answer "
-                "questions about health, healthy eating, sports training "
+                "questions about health, healthy eating, sports training, yoga "
                 "or sport events. Please reformulate your question in that "
                 "area 🙂"
             )
         }
 
-    # --- 2) Pregunta aceptada → llamada al modelo HF ---
+    # --- 2) Pregunta aceptada → modelo HF ---
     answer = await call_huggingface(msg, lang)
 
     # --- 3) Si falla o viene vacío → fallback local ---
