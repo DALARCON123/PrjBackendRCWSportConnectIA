@@ -62,14 +62,75 @@ class AskRequest(BaseModel):
 @app.get("/chat/health")
 async def health():
     return {"status": "ok", "service": "chat"}
-    
 
+
+# ============================
+#  System prompt (personalidad)
+# ============================
 SYSTEM_PROMPT = (
-    "Eres un coach deportivo conciso, claro e inclusivo. "
-    "Da consejos seguros para personas principiantes o intermedias. "
-    "Sugiere empezar suave e incrementar poco a poco. "
-    "Responde SIEMPRE en el idioma del usuario."
+    "Eres el Assistant Coach IA de SportConnectIA. "
+    "Solo puedes responder sobre SALUD, ALIMENTACIÓN SANA, NUTRICIÓN, "
+    "DEPORTE, ENTRENAMIENTO FÍSICO, RECUPERACIÓN, MOTIVACIÓN DEPORTIVA "
+    "y EVENTOS/COMPETICIONES DEPORTIVAS. "
+    "Tu principal misión es ayudar a la persona a entrenar mejor y llevar "
+    "un estilo de vida saludable. "
+    "Siempre que sea posible, propone ENTRENAMIENTOS SUGERIDOS adaptados "
+    "a la persona (nivel principiante, intermedio o avanzado, edad "
+    "aproximada, objetivo: perder peso, ganar músculo, salud general, "
+    "rendimiento, etc.). "
+    "Si no tienes suficiente información para personalizar el plan, "
+    "haz primero 2 o 3 preguntas sencillas (por ejemplo: nivel actual, "
+    "frecuencia de entrenamiento, lesiones o dolores importantes) y luego "
+    "propón una rutina simple y segura. "
+    "Tus recomendaciones deben ser prudentes: empieza suave, aumenta "
+    "progresivamente la carga y recomienda consultar a un profesional de "
+    "la salud en caso de dolor, enfermedad o condición médica. "
+    "Si la pregunta no está relacionada con esos temas, debes negarte "
+    "amablemente en UNA o DOS frases y pedir que reformule una pregunta "
+    "sobre deporte, salud o nutrición. "
+    "Sé conciso, claro e inclusivo y responde SIEMPRE en el idioma del usuario."
 )
+
+# ============================
+#  Filtro de dominios permitidos
+# ============================
+
+ALLOWED_KEYWORDS = [
+    # Español
+    "salud", "alimentación", "alimentacion", "nutrición", "nutricion",
+    "comida sana", "dieta", "ejercicio", "entrenamiento", "rutina",
+    "programa de entrenamiento", "plan de entrenamiento",
+    "deporte", "correr", "carrera", "caminar", "gimnasio", "fuerza", "cardio",
+    "yoga", "pilates", "partido", "torneo", "competición", "competicion",
+    "maratón", "maraton",
+
+    # Francés
+    "santé", "alimentation", "nutrition", "régime", "exercice",
+    "entraînement", "entrainement", "programme d'entraînement",
+    "routine d'entraînement", "sport", "musculation", "course",
+    "marche", "gym", "cardio", "yoga", "pilates",
+    "match", "tournoi", "compétition",
+
+    # Inglés
+    "health", "healthy food", "nutrition", "diet",
+    "workout", "training", "training plan", "workout plan", "routine",
+    "exercise", "sport", "gym", "running", "walking", "cardio",
+    "yoga", "pilates", "match", "tournament", "competition",
+]
+
+
+def is_allowed_question(text: str) -> bool:
+    """
+    Devuelve True si el mensaje parece estar relacionado con
+    salud, alimentación sana, deporte, entrenamiento o eventos deportivos.
+    """
+    t = (text or "").lower().strip()
+
+    # Dejar pasar saludos simples (el modelo responderá algo deportivo)
+    if t in ["hola", "bonjour", "salut", "hello", "hi", "buenas", "bonsoir"]:
+        return True
+
+    return any(k in t for k in ALLOWED_KEYWORDS)
 
 
 # ============================
@@ -79,23 +140,39 @@ def fallback_answer(msg: str, lang: str) -> str:
     m = msg.lower()
     if any(
         w in m
-        for w in ["deporte", "ejercicio", "sport", "exercise", "entrenar", "training"]
+        for w in [
+            "deporte", "ejercicio", "sport", "exercise", "entrenar",
+            "training", "entrenamiento", "rutina", "plan"
+        ]
     ):
         if lang.startswith("es"):
             return (
                 "Puedes empezar hoy con una caminata ligera de 20–30 minutos, "
                 "un poco de movilidad articular y 2–3 series de sentadillas, "
                 "plancha y puente de glúteos (10–12 repeticiones). "
-                "Aumenta poco a poco cada semana."
+                "Acompáñalo con agua, frutas, verduras y proteínas magras. "
+                "Cuéntame tu nivel (principiante, intermedio), tu objetivo "
+                "(bajar de peso, ganar músculo, salud) y cuántos días puedes "
+                "entrenar a la semana para afinar mejor tu rutina 😊"
             )
         if lang.startswith("fr"):
             return (
                 "Commence par 20–30 minutes de marche, un peu de mobilité, "
-                "puis 2–3 séries de squats, planche et pont fessier (10–12 répétitions)."
+                "puis 2–3 séries de squats, planche et pont fessier "
+                "(10–12 répétitions). "
+                "Ajoute beaucoup d’eau, des fruits, des légumes et des "
+                "protéines maigres. "
+                "Dis-moi ton niveau (débutant, intermédiaire), ton objectif "
+                "(perte de poids, prise de muscle, santé) et le nombre de "
+                "jours par semaine pour personnaliser ta routine 😊"
             )
         return (
-            "Start with a 20–30 minute walk, some mobility work, and 2–3 rounds "
-            "of squats, plank, and glute bridge (10–12 reps)."
+            "You can start with a 20–30 minute light walk, some mobility work, "
+            "and 2–3 sets of squats, plank and glute bridge (10–12 reps). "
+            "Combine it with water, fruits, vegetables and lean protein. "
+            "Tell me your level (beginner, intermediate), your goal "
+            "(fat loss, muscle gain, health) and how many days per week you "
+            "can train so I can personalize your routine 😊"
         )
 
     if lang.startswith("es"):
@@ -169,10 +246,40 @@ async def ask(req: AskRequest):
     if not msg:
         return {"answer": ""}
 
-    # 1) Intentar con modelo avanzado de HF
+    # --- 1) Filtro de dominio: solo salud/deporte/nutrición ---
+    if not is_allowed_question(msg):
+        if lang.startswith("fr"):
+            return {
+                "answer": (
+                    "Je suis l’Assistant Coach IA de SportConnectIA. "
+                    "Je peux seulement répondre sur la santé, "
+                    "l’alimentation saine, la nutrition sportive, "
+                    "l’entraînement ou des événements sportifs. "
+                    "Peux-tu reformuler ta question dans ce domaine ? 🙂"
+                )
+            }
+        if lang.startswith("es"):
+            return {
+                "answer": (
+                    "Soy el Assistant Coach IA de SportConnectIA. "
+                    "Solo puedo responder sobre salud, alimentación sana, "
+                    "nutrición deportiva, entrenamiento o eventos deportivos. "
+                    "Por favor, reformula tu pregunta en ese tema 🙂"
+                )
+            }
+        return {
+            "answer": (
+                "I am the SportConnectIA Assistant Coach. I can only answer "
+                "questions about health, healthy eating, sports training "
+                "or sport events. Please reformulate your question in that "
+                "area 🙂"
+            )
+        }
+
+    # --- 2) Pregunta aceptada → llamada al modelo HF ---
     answer = await call_huggingface(msg, lang)
 
-    # 2) Si falla o viene vacío → fallback local
+    # --- 3) Si falla o viene vacío → fallback local ---
     if not answer or not answer.strip():
         answer = fallback_answer(msg, lang)
 
@@ -181,4 +288,5 @@ async def ask(req: AskRequest):
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run("app.main:app", host="0.0.0.0", port=CHAT_PORT, reload=True)
