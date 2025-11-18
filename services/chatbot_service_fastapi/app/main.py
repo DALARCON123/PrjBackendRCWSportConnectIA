@@ -1,4 +1,8 @@
 # services/chatbot_service_fastapi/app/main.py
+
+# -------------------------------------------------------
+# Imports : système, FastAPI, CORS, modèles, HTTP, dotenv
+# -------------------------------------------------------
 import os
 from typing import Optional
 from pathlib import Path
@@ -9,15 +13,20 @@ from pydantic import BaseModel
 import httpx
 from dotenv import load_dotenv
 
-# =========================
-#   Cargar .env de la raíz
-# =========================
+# -------------------------------------------------------
+# Charger le fichier .env à la racine du projet
+# -------------------------------------------------------
 ROOT_ENV = Path(__file__).resolve().parents[3] / ".env"
 load_dotenv(ROOT_ENV)
 
+# -------------------------------------------------------
+# Création du service FastAPI pour le chatbot
+# -------------------------------------------------------
 app = FastAPI(title="ChatbotService")
 
-# === CORS para Vite (frontend) ===
+# -------------------------------------------------------
+# CORS : autoriser le frontend Vite à accéder au service
+# -------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -31,7 +40,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# === Config Hugging Face – Router (chat-completion) ===
+# -------------------------------------------------------
+# Config HuggingFace Router : modèle IA + token
+# -------------------------------------------------------
 HF_API_TOKEN = os.getenv("HF_API_TOKEN", "").strip()
 HF_MODEL = os.getenv("HF_MODEL", "google/gemma-2-2b-it").strip()
 HF_CHAT_URL = os.getenv(
@@ -49,159 +60,166 @@ print(
     f"HF Router -> model: {HF_MODEL} | token_len: "
     f"{len(HF_API_TOKEN) if HF_API_TOKEN else 0}"
 )
+
 if not HF_API_TOKEN:
-    print("HF_API_TOKEN no está configurada, solo se usará el fallback local.")
+    print("HF_API_TOKEN no está configurada, solo fallback local.")
 
 
+# -------------------------------------------------------
+# Modèle de la requête envoyée au chatbot
+# -------------------------------------------------------
 class AskRequest(BaseModel):
     message: str
     lang: Optional[str] = "es"
     profile: Optional[dict] = None
 
 
+# -------------------------------------------------------
+# Test rapide : vérifier que le service está vivo
+# -------------------------------------------------------
 @app.get("/chat/health")
 async def health():
     return {"status": "ok", "service": "chat"}
 
 
-# ============================
-#  System prompt (personalidad)
-# ============================
+# -------------------------------------------------------
+# Prompt système : personalidad del Coach IA (AMPLIADO)
+# -------------------------------------------------------
 SYSTEM_PROMPT = (
     "Eres el Assistant Coach IA de SportConnectIA. "
-    "Solo puedes responder sobre SALUD, ALIMENTACIÓN SANA, NUTRICIÓN, "
-    "DEPORTE, ENTRENAMIENTO FÍSICO, YOGA, RECUPERACIÓN, MOTIVACIÓN DEPORTIVA "
-    "y EVENTOS/COMPETICIONES DEPORTIVAS. "
-    "Tu principal misión es ayudar a la persona a entrenar mejor y llevar "
-    "un estilo de vida saludable. "
-    "Siempre que sea posible, propone ENTRENAMIENTOS SUGERIDOS adaptados "
-    "a la persona (nivel principiante, intermedio o avanzado, edad "
-    "aproximada, objetivo: perder peso, ganar músculo, salud general, "
-    "rendimiento, etc.). "
-    "Si no tienes suficiente información para personalizar el plan, "
-    "haz primero 2 o 3 preguntas sencillas (por ejemplo: nivel actual, "
-    "frecuencia de entrenamiento, lesiones o dolores importantes) y luego "
-    "propón una rutina simple y segura. "
-    "Tus recomendaciones deben ser prudentes: empieza suave, aumenta "
-    "progresivamente la carga y recomienda consultar a un profesional de "
-    "la salud en caso de dolor, enfermedad o condición médica. "
-    "Si la pregunta no está relacionada con esos temas, debes negarte "
-    "amablemente en UNA o DOS frases y pedir que reformule una pregunta "
-    "sobre deporte, salud, nutrición o yoga. "
-    "Sé conciso, claro e inclusivo y responde SIEMPRE en el idioma del usuario."
+    "Tu dominio es amplio dentro de la SALUD y el BIENESTAR FÍSICO y MENTAL, "
+    "incluyendo:\n"
+    "- deporte en general (deportes de equipo como fútbol, baloncesto, "
+    "voleibol; deportes individuales como running, natación, ciclismo, tenis, etc.),\n"
+    "- entrenamiento de fuerza y resistencia (gym, pesas, HIIT, cardio suave),\n"
+    "- movilidad, estiramientos, flexibilidad, calentamiento y vuelta a la calma,\n"
+    "- yoga, pilates, respiración, manejo del estrés y recuperación,\n"
+    "- alimentación saludable, nutrición deportiva, hidratación, sueño y descanso.\n"
+    "Tu misión es ayudar a la persona a entrenar mejor, sentirse más fuerte y "
+    "llevar un estilo de vida equilibrado. Siempre que sea posible, propone:\n"
+    "1) un plan o rutina sencilla y segura adaptada al nivel, objetivo y tiempo disponible,\n"
+    "2) consejos de alimentación e hidratación razonables,\n"
+    "3) recomendaciones de recuperación, sueño y gestión del estrés.\n"
+    "Si no tienes suficiente información, haz primero 2 o 3 preguntas simples "
+    "(nivel, frecuencia, lesiones, tiempo disponible).\n"
+    "Sé prudente: empieza con intensidades moderadas, sugiere progresión gradual "
+    "y recomienda consultar a un profesional de la salud en caso de dolor o "
+    "condición médica. Si la pregunta está claramente fuera de estos temas "
+    "(política, programación, chismes, etc.), rechaza amablemente en una o dos "
+    "frases e invita a formular una pregunta sobre deporte, salud, yoga o nutrición.\n"
+    "Responde SIEMPRE en el idioma del usuario."
 )
 
-# ============================
-#  Filtro de dominios permitidos
-# ============================
 
+# -------------------------------------------------------
+# Palabras clave permitidas para filtrar preguntas (AMPLIADO)
+# -------------------------------------------------------
 ALLOWED_KEYWORDS = [
-    # Español
-    "salud", "alimentación", "alimentacion", "nutrición", "nutricion",
-    "comida sana", "dieta", "ejercicio", "entrenamiento", "rutina",
-    "programa de entrenamiento", "plan de entrenamiento",
-    "deporte", "correr", "carrera", "caminar", "gimnasio", "fuerza", "cardio",
-    "yoga", "pilates", "partido", "torneo", "competición", "competicion",
-    "maratón", "maraton",
+    # Español – salud / nutrición / bienestar
+    "salud", "bienestar", "alimentación", "alimentacion", "nutrición", "nutricion",
+    "dieta", "comida sana", "comida saludable", "calorías", "calorias",
+    "proteína", "proteina", "proteínas", "proteinas",
+    "carbohidratos", "grasas saludables", "hidratar", "hidratación", "suplemento",
+    "suplementos", "vitaminas", "minerales",
+    "sueño", "dormir", "descanso", "estrés", "estres", "ansiedad",
+    # Español – entrenamiento / deportes
+    "ejercicio", "entrenamiento", "rutina", "programa de entrenamiento",
+    "deporte", "deportes", "cardio", "resistencia", "fuerza", "músculo",
+    "musculo", "músculos", "musculos",
+    "caminar", "correr", "running", "trote", "maratón", "maraton",
+    "natación", "natacion", "nadar", "ciclismo", "bicicleta", "spinning",
+    "gimnasio", "gym", "pesas", "levantamiento",
+    "fútbol", "futbol", "baloncesto", "basket", "voleibol", "tenis",
+    "flexibilidad", "movilidad", "estiramiento", "estiramientos", "stretching",
+    "lesión", "lesiones", "dolor muscular", "agujetas",
+    "yoga", "pilates", "respiración", "respiracion", "mindfulness",
+    "meditación", "meditacion",
 
-    # Francés
-    "santé", "alimentation", "nutrition", "régime", "exercice",
-    "entraînement", "entrainement", "programme d'entraînement",
-    "routine d'entraînement", "sport", "musculation", "course",
-    "marche", "gym", "cardio", "yoga", "pilates",
-    "match", "tournoi", "compétition",
+    # Français – santé / nutrition / bien-être
+    "santé", "bien-être", "alimentation", "nutrition", "régime",
+    "alimentation saine", "calories", "protéines", "glucides", "lipides",
+    "hydratation", "suppléments", "vitamines", "minéraux",
+    "sommeil", "dormir", "repos", "stress", "anxiété",
+    # Français – sport / entraînement
+    "exercice", "entraînement", "entrainement", "routine", "programme d'entraînement",
+    "sport", "sports", "cardio", "endurance", "force", "musculation",
+    "course", "footing", "running", "marathon",
+    "natation", "vélo", "cyclisme", "vélo elliptique",
+    "gym", "salle de sport", "haltères", "poids",
+    "football", "basket", "basketball", "volley", "tennis",
+    "souplesse", "mobilité", "étirements", "stretching",
+    "blessure", "douleur musculaire",
+    "yoga", "pilates", "respiration", "méditation",
 
-    # Inglés
-    "health", "healthy food", "nutrition", "diet",
-    "workout", "training", "training plan", "workout plan", "routine",
-    "exercise", "sport", "gym", "running", "walking", "cardio",
-    "yoga", "pilates", "match", "tournament", "competition",
+    # English – health / nutrition / wellness
+    "health", "wellbeing", "well-being", "healthy", "nutrition", "diet",
+    "calories", "protein", "proteins", "carbs", "fats", "hydration",
+    "supplement", "supplements", "vitamins", "minerals",
+    "sleep", "rest", "recovery", "stress", "anxiety",
+    # English – training / sports
+    "exercise", "workout", "training", "training plan", "routine",
+    "sport", "sports", "cardio", "endurance", "strength", "muscle", "muscles",
+    "walk", "walking", "run", "running", "jog", "jogging", "marathon",
+    "swim", "swimming", "bike", "biking", "cycling",
+    "gym", "weights", "weight training",
+    "football", "soccer", "basketball", "volleyball", "tennis",
+    "flexibility", "mobility", "stretch", "stretching",
+    "injury", "injuries", "muscle pain", "soreness",
+    "yoga", "pilates", "breathing", "mindfulness", "meditation",
 ]
 
 
+# -------------------------------------------------------
+# Vérifie si la pregunta está relacionada con deporte/salud
+# -------------------------------------------------------
 def is_allowed_question(text: str) -> bool:
     """
     Devuelve True si el mensaje parece estar relacionado con
-    salud, alimentación sana, deporte, entrenamiento o eventos deportivos.
+    salud, deporte, nutrición, bienestar, yoga, etc.
+    El filtro es amplio para no bloquear preguntas útiles.
     """
     t = (text or "").lower().strip()
 
-    # Dejar pasar saludos simples (el modelo responderá algo deportivo)
-    if t in ["hola", "bonjour", "salut", "hello", "hi", "buenas", "bonsoir"]:
+    # saludos / mensajes cortos al coach → dejar pasar
+    if t in ["hola", "bonjour", "salut", "hello", "hi", "buenas", "bonsoir", "hey", "hola coach", "salut coach"]:
         return True
 
+    # preguntas muy cortitas tipo "rutina gym", "plan yoga"
+    if len(t) <= 15 and any(k in t for k in ["gym", "yoga", "sport", "deporte", "salud"]):
+        return True
+
+    # buscar cualquier palabra clave de nuestro dominio
     return any(k in t for k in ALLOWED_KEYWORDS)
 
 
-# ============================
-#  Fallback local sencillo
-# ============================
+# -------------------------------------------------------
+# Respuesta básica si HuggingFace falla o no hay token
+# -------------------------------------------------------
 def fallback_answer(msg: str, lang: str) -> str:
-    m = msg.lower()
-    if any(
-        w in m
-        for w in [
-            "deporte", "ejercicio", "sport", "exercise", "entrenar",
-            "training", "entrenamiento", "rutina", "plan", "yoga"
-        ]
-    ):
-        if lang.startswith("es"):
-            return (
-                "Puedes empezar hoy con una caminata ligera de 20–30 minutos, "
-                "un poco de movilidad articular y 2–3 series de sentadillas, "
-                "plancha y puente de glúteos (10–12 repeticiones). "
-                "Si te interesa el yoga, comienza con 10–15 minutos de posturas "
-                "suaves (como el perro boca abajo, el gato-vaca y la postura del niño) "
-                "y enfócate en respirar de forma lenta y profunda. "
-                "Acompáñalo con agua, frutas, verduras y proteínas magras. "
-                "Cuéntame tu nivel (principiante, intermedio), tu objetivo "
-                "(bajar de peso, ganar músculo, salud, flexibilidad) y cuántos días puedes "
-                "entrenar a la semana para afinar mejor tu rutina 😊"
-            )
-        if lang.startswith("fr"):
-            return (
-                "Commence par 20–30 minutes de marche, un peu de mobilité, "
-                "puis 2–3 séries de squats, planche et pont fessier "
-                "(10–12 répétitions). "
-                "Si tu t'intéresses au yoga, démarre avec 10–15 minutes de postures "
-                "douces (chien tête en bas, chat-vache, posture de l’enfant) "
-                "en respirant calmement. "
-                "Ajoute beaucoup d’eau, des fruits, des légumes et des "
-                "protéines maigres. "
-                "Dis-moi ton niveau (débutant, intermédiaire), ton objectif "
-                "(perte de poids, prise de muscle, santé, souplesse) et le nombre de "
-                "jours par semaine pour personnaliser ta routine 😊"
-            )
-        return (
-            "You can start with a 20–30 minute light walk, some mobility work, "
-            "and 2–3 sets of squats, plank and glute bridge (10–12 reps). "
-            "If you are interested in yoga, begin with 10–15 minutes of gentle "
-            "poses (like downward dog, cat-cow and child’s pose) with slow breathing. "
-            "Combine it with water, fruits, vegetables and lean protein. "
-            "Tell me your level (beginner, intermediate), your goal "
-            "(fat loss, muscle gain, health, flexibility) and how many days per week you "
-            "can train so I can personalize your routine 😊"
-        )
+    m = (msg or "").lower()
 
-    if lang.startswith("es"):
-        return (
-            "Cuéntame tu objetivo (salud, fuerza, peso, yoga, tiempo disponible) "
-            "y armamos un plan rápido 😊"
-        )
+    # pequeño mensaje más “coach”
     if lang.startswith("fr"):
         return (
-            "Dis-moi ton objectif (santé, force, poids, yoga, temps disponible) "
-            "et on crée un plan rapide 😊"
+            "Dis-moi ton objectif (santé, perte de poids, prise de muscle, "
+            "énergie, stress) et ton niveau actuel, et je te propose une "
+            "routine simple (sport, yoga ou mobilité) 😊"
+        )
+    if lang.startswith("es"):
+        return (
+            "Cuéntame tu objetivo (salud, peso, músculo, energía o estrés) "
+            "y tu nivel actual, y te propongo una rutina sencilla de deporte, "
+            "cardio o yoga 😊"
         )
     return (
-        "Tell me your goal (health, strength, weight, yoga, time) "
-        "and we’ll create a quick plan 😊"
+        "Tell me your goal (health, weight, muscle, energy or stress) and your "
+        "current level, and I’ll propose a simple workout or yoga routine 😊"
     )
 
 
-# ============================
-#  Llamada al Router HF
-# ============================
+# -------------------------------------------------------
+# Llamada al modelo IA en HuggingFace Router
+# -------------------------------------------------------
 async def call_huggingface(question: str, lang: str) -> str:
     if not HF_API_TOKEN:
         return ""
@@ -217,7 +235,7 @@ async def call_huggingface(question: str, lang: str) -> str:
             {"role": "system", "content": SYSTEM_PROMPT},
             {
                 "role": "user",
-                "content": f"Idioma del usuario: {lang}\n\nPregunta: {question}",
+                "content": f"Idioma / Lang / Langue du usuario: {lang}\n\nPregunta / Question: {question}",
             },
         ],
         "max_tokens": MAX_RESPONSE_TOKENS,
@@ -230,25 +248,21 @@ async def call_huggingface(question: str, lang: str) -> str:
             resp = await client.post(HF_CHAT_URL, headers=headers, json=payload)
             resp.raise_for_status()
             data = resp.json()
-    except Exception as e:
-        print(f"Error llamando a Hugging Face Router: {e}")
+    except Exception:
         return ""
 
     try:
         choices = data.get("choices") or []
         if not choices:
             return ""
-        message = choices[0].get("message") or {}
-        content = message.get("content") or ""
-        return str(content).strip()
-    except Exception as e:
-        print(f"Error parseando respuesta de Hugging Face: {e}")
+        return (choices[0].get("message") or {}).get("content", "").strip()
+    except Exception:
         return ""
 
 
-# ============================
-#  Endpoint principal
-# ============================
+# -------------------------------------------------------
+# Endpoint principal : recibe pregunta → responde IA
+# -------------------------------------------------------
 @app.post("/chat/ask")
 async def ask(req: AskRequest):
     msg = (req.message or "").strip()
@@ -257,46 +271,47 @@ async def ask(req: AskRequest):
     if not msg:
         return {"answer": ""}
 
-    # --- 1) Filtro de dominio ---
+    # --- Filtrar dominio permitido (pero más amplio) ---
     if not is_allowed_question(msg):
         if lang.startswith("fr"):
             return {
                 "answer": (
                     "Je suis l’Assistant Coach IA de SportConnectIA. "
-                    "Je peux seulement répondre sur la santé, "
-                    "l’alimentation saine, la nutrition sportive, "
-                    "l’entraînement, le yoga ou des événements sportifs. "
-                    "Peux-tu reformuler ta question dans ce domaine ? 🙂"
+                    "Je réponds uniquement sur le sport, la santé, la "
+                    "nutrition, le bien-être, le yoga et la récupération. "
+                    "Peux-tu reformuler ta question dans ce domaine ? 😊"
                 )
             }
         if lang.startswith("es"):
             return {
                 "answer": (
                     "Soy el Assistant Coach IA de SportConnectIA. "
-                    "Solo puedo responder sobre salud, alimentación sana, "
-                    "nutrición deportiva, entrenamiento, yoga o eventos deportivos. "
-                    "Por favor, reformula tu pregunta en ese tema 🙂"
+                    "Respondo sobre deporte, salud, nutrición, bienestar, "
+                    "yoga y recuperación. ¿Puedes reformular tu pregunta en "
+                    "ese tema? 😊"
                 )
             }
         return {
             "answer": (
-                "I am the SportConnectIA Assistant Coach. I can only answer "
-                "questions about health, healthy eating, sports training, yoga "
-                "or sport events. Please reformulate your question in that "
-                "area 🙂"
+                "I’m the SportConnectIA Assistant Coach. I answer questions "
+                "about sport, health, nutrition, wellness, yoga and recovery. "
+                "Please reformulate your question in that area 😊"
             )
         }
 
-    # --- 2) Pregunta aceptada → modelo HF ---
+    # --- Llamar al modelo HF ---
     answer = await call_huggingface(msg, lang)
 
-    # --- 3) Si falla o viene vacío → fallback local ---
-    if not answer or not answer.strip():
+    # --- Si falla → fallback local ---
+    if not answer:
         answer = fallback_answer(msg, lang)
 
-    return {"answer": answer.strip()}
+    return {"answer": answer}
 
 
+# -------------------------------------------------------
+# Ejecutar el servicio directamente con Python
+# -------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
 
