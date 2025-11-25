@@ -1,46 +1,54 @@
+# app/db.py
 # -------------------------------------------------------
-# Importation du module sqlite3 pour gérer la base SQLite
+# Configuration de la base de données avec SQLAlchemy
 # -------------------------------------------------------
-import sqlite3
 
-# -------------------------------------------------------
-# Importation de Path pour construire des chemins dynamiques
-# -------------------------------------------------------
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, declarative_base
 from pathlib import Path
+import os
 
 # -------------------------------------------------------
-# Définition du chemin complet vers la base de données "auth.db"
-# Le fichier se trouve deux niveaux au-dessus du script actuel
+# Dossier courant (app) et chemin du fichier SQLite
+# Exemple : services/auth_service_fastapi/app/auth.db
 # -------------------------------------------------------
-DB_PATH = Path(__file__).resolve().parent.parent / "auth.db"
+BASE_DIR = Path(__file__).resolve().parent
+DB_FILE = BASE_DIR / "auth.db"
+
+# URL de connexion SQLite (fichier local)
+SQLALCHEMY_DATABASE_URL = f"sqlite:///{DB_FILE}"
+
+# -------------------------------------------------------
+# Création du moteur SQLAlchemy
+# check_same_thread=False : nécessaire avec SQLite + FastAPI
+# -------------------------------------------------------
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL,
+    connect_args={"check_same_thread": False},
+)
+
+# -------------------------------------------------------
+# SessionLocal : fabrique de sessions pour interagir avec la BD
+# -------------------------------------------------------
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# -------------------------------------------------------
+# Base : classe de base pour tous les modèles (User, Notification, etc.)
+# C'est cet objet que tu importes dans models.py
+# -------------------------------------------------------
+Base = declarative_base()
 
 
 # -------------------------------------------------------
-# Fonction pour obtenir une connexion active à la base SQLite
-# row_factory permet d'accéder aux colonnes par leur nom
+# Dépendance FastAPI : obtenir une session de BD par requête
 # -------------------------------------------------------
-def get_conn():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-# -------------------------------------------------------
-# Fonction d'initialisation de la base de données
-# Elle crée la table 'users' si elle n'existe pas déjà
-# Les colonnes :
-#   - email : identifiant principal (clé primaire)
-#   - name : nom de l'utilisateur
-#   - password_hash : mot de passe chiffré
-#   - created_at : date et heure d'inscription (automatique)
-# -------------------------------------------------------
-def init_db():
-    with get_conn() as c:
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            email TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            password_hash TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """)
+def get_db():
+    """
+    Ouvre une session de base de données pour la requête,
+    puis la ferme automatiquement après.
+    """
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
