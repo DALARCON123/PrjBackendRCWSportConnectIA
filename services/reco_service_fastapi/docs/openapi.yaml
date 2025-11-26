@@ -1,0 +1,47 @@
+openapi: 3.0.3
+info:
+  title: API de Recommandation SportConnectIA
+  version: 1.0.0
+  description: |
+    Service IA pour recommander des sports ou activités selon le profil utilisateur.
+servers:
+  - url: http://localhost:8003
+paths:
+  /reco/personal:
+    post:
+      summary: Obtenir des recommandations personnalisées
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                objectifs: { type: string, example: "Perte de poids" }
+                niveau: { type: string, example: "Débutant" }
+                disponibilite: { type: string, example: "3 jours/semaine" }
+      responses:
+        "200": { description: Liste de recommandations IA }
+
+  /reco/similar:
+    post:
+      summary: Recommandations similaires à un sport donné
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sport_id: { type: integer }
+      responses:
+        "200": { description: Liste d’activités similaires }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

@@ -1,0 +1,56 @@
+openapi: 3.0.3
+info:
+  title: API d’authentification SportConnectIA
+  version: 1.0.0
+  description: |
+    Service d'authentification avec inscription, connexion et jetons JWT.
+    Langues : Français, Español, Português.
+servers:
+  - url: http://localhost:8001
+paths:
+  /auth/register:
+    post:
+      summary: Créer un nouveau compte utilisateur
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, example: "Diana Alarcon" }
+                email: { type: string, example: "diana@mail.com" }
+                password: { type: string, example: "MonSecret123" }
+      responses:
+        "201": { description: "Utilisateur créé avec succès" }
+        "400": { description: "Email déjà existant" }
+
+  /auth/login:
+    post:
+      summary: Authentifier un utilisateur
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email: { type: string }
+                password: { type: string }
+      responses:
+        "200":
+          description: Jeton JWT retourné
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token: { type: string }
+                  token_type: { type: string, example: "Bearer" }
+        "401": { description: "Identifiants invalides" }
+
+  /auth/health:
+    get:
+      summary: Vérifier l’état du service
+      responses:
+        "200": { description: "Service opérationnel" }
