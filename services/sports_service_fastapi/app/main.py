@@ -6,6 +6,11 @@ from pathlib import Path
 from dotenv import load_dotenv
 import os
 
+
+# Import pour l’envoi d’e-mails
+from .email_utils import send_daily_summary_email
+from pydantic import BaseModel
+
 # -------------------------------------------------------
 # Charger le fichier .env depuis la racine du projet
 # -------------------------------------------------------
@@ -62,6 +67,31 @@ def list_sports():
 def search(q: str = Query("")):
     ql = q.lower()
     return [s for s in SPORTS if ql in s["name"].lower()]
+
+# =======================================================
+# 📧 NOUVEL ENDPOINT : ENVOYER UN RÉSUMÉ PAR E-MAIL
+# =======================================================
+
+class DailySummaryRequest(BaseModel):
+    email: str
+    client_name: str
+    checklist: list[str]
+    evolution: str
+
+
+@app.post("/send-daily-summary")
+def send_summary(data: DailySummaryRequest):
+    """
+    Envoie au client un résumé quotidien d'entraînement par e-mail.
+    """
+    send_daily_summary_email(
+        to_email=data.email,
+        client_name=data.client_name,
+        checklist=data.checklist,
+        evolution_text=data.evolution
+    )
+    return {"message": "Résumé envoyé avec succès."}
+
 
 # -------------------------------------------------------
 # Lancer le service directement depuis Python
