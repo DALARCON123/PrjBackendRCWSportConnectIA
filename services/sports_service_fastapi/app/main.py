@@ -1,101 +1,82 @@
-# services/sports_service_fastapi/app/main.py
-
 from fastapi import FastAPI, Query
-from fastapi.middleware.cors import CORSMiddleware
-from pathlib import Path
-from dotenv import load_dotenv
-import os
+import requests
+
+app = FastAPI()
 
 
-# Import pour l’envoi d’e-mails
-from .email_utils import send_daily_summary_email
-from pydantic import BaseModel
+# ------------------------------- YOUTUBE SEARCH -------------------------------
+def rechercher_videos_youtube(requete: str):
+    url = f"https://yt-api.p.rapidapi.com/search?query={requete}&type=video"
+    headers = {
+        "x-rapidapi-key": "TA_CLE_RAPIDAPI_ICI",
+        "x-rapidapi-host": "yt-api.p.rapidapi.com"
+    }
 
-# -------------------------------------------------------
-# Charger le fichier .env depuis la racine du projet
-# -------------------------------------------------------
-ROOT_ENV = Path(__file__).resolve().parents[3] / ".env"
-load_dotenv(ROOT_ENV)
+    rep = requests.get(url, headers=headers)
+    data = rep.json()
 
-# -------------------------------------------------------
-# Port du service Sports (défini dans .env)
-# -------------------------------------------------------
-SPORTS_PORT = int(os.getenv("SPORTS_PORT") or os.getenv("PORT", "8002"))
+    videos = []
 
-# -------------------------------------------------------
-# Création de l’application FastAPI
-# -------------------------------------------------------
-app = FastAPI(title="Sports Service")
+    for item in data.get("data", [])[:6]:
+        videos.append({
+            "title": item["title"],
+            "image": item["thumbnail"]["url"],
+            "videoId": item["videoId"],
+            "link": f"https://www.youtube.com/watch?v={item['videoId']}"
+        })
 
-# -------------------------------------------------------
-# CORS : autoriser les appels du frontend Vite
-# -------------------------------------------------------
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:5174",
-        "http://127.0.0.1:5174",
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# -------------------------------------------------------
-# Petite base statique de sports disponibles
-# -------------------------------------------------------
-SPORTS = [
-    {"id": "run", "name": "Running", "level": "beginner"},
-    {"id": "yoga", "name": "Yoga", "level": "all"},
-    {"id": "swim", "name": "Natación", "level": "all"},
-    {"id": "strength", "name": "Fuerza", "level": "intermediate"},
-]
-
-# -------------------------------------------------------
-# Retourne la liste complète des sports
-# -------------------------------------------------------
-@app.get("/sports")
-def list_sports():
-    return SPORTS
-
-# -------------------------------------------------------
-# Recherche simple par nom (filtre sur la liste)
-# -------------------------------------------------------
-@app.get("/sports/search")
-def search(q: str = Query("")):
-    ql = q.lower()
-    return [s for s in SPORTS if ql in s["name"].lower()]
-
-# =======================================================
-# 📧 NOUVEL ENDPOINT : ENVOYER UN RÉSUMÉ PAR E-MAIL
-# =======================================================
-
-class DailySummaryRequest(BaseModel):
-    email: str
-    client_name: str
-    checklist: list[str]
-    evolution: str
+    return videos
 
 
-@app.post("/send-daily-summary")
-def send_summary(data: DailySummaryRequest):
-    """
-    Envoie au client un résumé quotidien d'entraînement par e-mail.
-    """
-    send_daily_summary_email(
-        to_email=data.email,
-        client_name=data.client_name,
-        checklist=data.checklist,
-        evolution_text=data.evolution
-    )
-    return {"message": "Résumé envoyé avec succès."}
+# -------------------------- RECOMMANDATIONS GLOBALES --------------------------
+@app.get("/sports/recommendations")
+def recommandations_sportives(
+    age: int = Query(...),
+    poids: int = Query(...),
+    objectif: str = Query(...)
+):
+
+    if age < 30:
+        categorie = "HIIT pour débutants"
+    elif 30 <= age < 55:
+        categorie = "Cardio à faible impact"
+    else:
+        categorie = "Exercices doux pour seniors"
+
+    if objectif == "Perte de poids":
+        requete = "cardio pour perdre du poids"
+    elif objectif == "Gain de muscle":
+        requete = "musculation à la maison"
+    else:
+        requete = "exercices de bien-être"
+
+    videos = rechercher_videos_youtube(requete)
+
+    return {
+        "categorie_recommandee": categorie,
+        "videos": videos
+    }
 
 
-# -------------------------------------------------------
-# Lancer le service directement depuis Python
-# -------------------------------------------------------
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("app.main:app", host="0.0.0.0", port=SPORTS_PORT, reload=True)
+# ---------------------- VIDEOS PAR CATÉGORIE CLIQUÉE -------------------------
+@app.get("/sports/category")
+def videos_par_categorie(name: str):
+
+    mapping = {
+        "Yoga": "yoga débutants",
+        "Cardio": "cardio maison",
+        "HIIT": "séance HIIT",
+        "Musculation": "musculation maison",
+        "Étirements": "étirements complets",
+        "Pilates": "pilates débutants",
+        "Danse Fitness": "danse fitness exercices",
+        "Marche Active": "walking workout indoor",
+    }
+
+    requete = mapping.get(name, name)
+    videos = rechercher_videos_youtube(requete)
+
+    return {
+        "categorie": name,
+        "videos": videos
+    }

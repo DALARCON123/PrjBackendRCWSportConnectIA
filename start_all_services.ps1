@@ -43,9 +43,9 @@ $SERVICES = @(
     @{
         Nom     = "recommandation"
         Dossier = "reco_service_fastapi"
-        Port    = 8003
+        Port    = 8004
         Module  = "app.main"
-        TestUrl = "http://127.0.0.1:8003/tracking/measurements?email=test@test.com"
+        TestUrl = "http://127.0.0.1:8004/tracking/measurements?email=test@test.com"
     },
     @{
         Nom     = "chatbot"
@@ -84,6 +84,6 @@ Write-Host " Tous les services ont été lancés (processus séparés)." -Foregr
 Write-Host " Tests rapides :" -ForegroundColor White
 Write-Host "   Auth   : http://127.0.0.1:8001/auth/health"
 Write-Host "   Sports : http://127.0.0.1:8002/sports"
-Write-Host "   Reco   : http://127.0.0.1:8003/tracking/measurements?email=test@test.com"
+Write-Host "   Reco   : http://127.0.0.1:8004/tracking/measurements?email=test@test.com"
 Write-Host "   Chat   : http://127.0.0.1:8010/chat/health"
 Write-Host "===========================================" -ForegroundColor Green
