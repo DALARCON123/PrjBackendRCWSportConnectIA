@@ -207,3 +207,4 @@ marimo/_lsp/
 __marimo__/
 firebase-admin-key.json
 tracking.db
+auth_export.json
