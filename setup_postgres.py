@@ -31,7 +31,7 @@ def find_working_credentials():
                 password=password,
                 database='postgres'
             )
-            print(f"✓ Conectado com sucesso usando: user={user}")
+            print(f"✓ Connecté avec succès en utilisant : user={user}")
             return conn, user, password
         except psycopg2.OperationalError as e:
             continue
@@ -42,8 +42,8 @@ def setup_database():
     conn, working_user, working_password = find_working_credentials()
     
     if not conn:
-        print("\n❌ Não foi possível conectar ao PostgreSQL com nenhuma credencial conhecida.")
-        print("\nPor favor, execute manualmente no PostgreSQL:")
+        print("\n❌ Impossible de se connecter à PostgreSQL avec les identifiants connus.")
+        print("\nVeuillez exécuter manuellement dans PostgreSQL :")
         print(f"  CREATE USER {TARGET_USER} WITH PASSWORD '{TARGET_PASSWORD}';")
         print(f"  CREATE DATABASE {TARGET_DB} OWNER {TARGET_USER};")
         print(f"  GRANT ALL PRIVILEGES ON DATABASE {TARGET_DB} TO {TARGET_USER};")
@@ -58,63 +58,63 @@ def setup_database():
         user_exists = cursor.fetchone()
         
         if not user_exists:
-            print(f"\n📝 Criando usuário '{TARGET_USER}'...")
+            print(f"\n📝 Création de l'utilisateur '{TARGET_USER}'...")
             cursor.execute(
                 sql.SQL("CREATE USER {} WITH PASSWORD %s").format(sql.Identifier(TARGET_USER)),
                 (TARGET_PASSWORD,)
             )
-            print(f"✓ Usuário '{TARGET_USER}' criado com sucesso")
+            print(f"✓ Utilisateur '{TARGET_USER}' créé avec succès")
         else:
-            print(f"\n✓ Usuário '{TARGET_USER}' já existe. Atualizando senha...")
+            print(f"\n✓ L'utilisateur '{TARGET_USER}' existe déjà. Mise à jour du mot de passe...")
             cursor.execute(
                 sql.SQL("ALTER USER {} WITH PASSWORD %s").format(sql.Identifier(TARGET_USER)),
                 (TARGET_PASSWORD,)
             )
-            print(f"✓ Senha do usuário '{TARGET_USER}' atualizada")
+            print(f"✓ Mot de passe de l'utilisateur '{TARGET_USER}' mis à jour")
         
         # Vérifier si la base de données existe déjà
         cursor.execute("SELECT 1 FROM pg_database WHERE datname=%s", (TARGET_DB,))
         db_exists = cursor.fetchone()
         
         if not db_exists:
-            print(f"\n📝 Criando banco de dados '{TARGET_DB}'...")
+            print(f"\n📝 Création de la base de données '{TARGET_DB}'...")
             cursor.execute(
                 sql.SQL("CREATE DATABASE {} OWNER {}").format(
                     sql.Identifier(TARGET_DB),
                     sql.Identifier(TARGET_USER)
                 )
             )
-            print(f"✓ Banco de dados '{TARGET_DB}' criado com sucesso")
+            print(f"✓ Base de données '{TARGET_DB}' créée avec succès")
         else:
-            print(f"\n✓ Banco de dados '{TARGET_DB}' já existe")
+            print(f"\n✓ La base de données '{TARGET_DB}' existe déjà")
         
         # Accorder les privilèges
-        print(f"\n📝 Concedendo privilégios...")
+        print(f"\n📝 Attribution des privilèges...")
         cursor.execute(
             sql.SQL("GRANT ALL PRIVILEGES ON DATABASE {} TO {}").format(
                 sql.Identifier(TARGET_DB),
                 sql.Identifier(TARGET_USER)
             )
         )
-        print(f"✓ Privilégios concedidos ao usuário '{TARGET_USER}'")
+        print(f"✓ Privilèges accordés à l'utilisateur '{TARGET_USER}'")
         
         cursor.close()
         conn.close()
         
         print("\n" + "="*60)
-        print("✅ Configuração do PostgreSQL concluída com sucesso!")
+        print("✅ Configuration de PostgreSQL terminée avec succès !")
         print("="*60)
-        print(f"\nCredenciais configuradas:")
+        print(f"\nIdentifiants configurés :")
         print(f"  Host: localhost")
         print(f"  Port: 5432")
         print(f"  User: {TARGET_USER}")
         print(f"  Password: {TARGET_PASSWORD}")
         print(f"  Database: {TARGET_DB}")
-        print(f"\nURL de conexão:")
+        print(f"\nURL de connexion :")
         print(f"  postgresql://{TARGET_USER}:{TARGET_PASSWORD}@localhost:5432/{TARGET_DB}")
         
         # Tester la connexion avec les nouveaux identifiants
-        print(f"\n🧪 Testando conexão com as novas credenciais...")
+        print(f"\n🧪 Test de connexion avec les nouveaux identifiants...")
         test_conn = psycopg2.connect(
             host='localhost',
             port=5432,
@@ -122,11 +122,11 @@ def setup_database():
             password=TARGET_PASSWORD,
             database=TARGET_DB
         )
-        print("✅ Teste de conexão bem-sucedido!")
+        print("✅ Test de connexion réussi !")
         test_conn.close()
         
     except Exception as e:
-        print(f"\n❌ Erro durante a configuração: {e}")
+        print(f"\n❌ Erreur pendant la configuration : {e}")
         sys.exit(1)
 
 if __name__ == "__main__":

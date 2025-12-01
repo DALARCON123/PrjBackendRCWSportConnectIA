@@ -37,4 +37,4 @@ recommendations_collection = db["recommendations"]
 sensor_data_collection = db["sensor_data"]
 health_metrics_collection = db["health_metrics"]
 
-print(f"[MongoDB] Conectado ao banco: {MONGODB_DB_NAME}")
+print(f"[MongoDB] Connecté à la base de données : {MONGODB_DB_NAME}")
