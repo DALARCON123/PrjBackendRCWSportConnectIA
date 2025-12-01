@@ -54,7 +54,7 @@ MAX_RESPONSE_TOKENS = int(os.getenv("MAX_RESPONSE_TOKENS", "500"))
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.7"))
 TOP_P = float(os.getenv("TOP_P", "0.9"))
 
-CHAT_PORT = int(os.getenv("CHAT_PORT") or os.getenv("PORT", "8010"))
+CHAT_PORT = int(os.getenv("CHATBOT_PORT") or os.getenv("PORT", "8004"))
 
 print(
     f"HF Router -> model: {HF_MODEL} | token_len: "

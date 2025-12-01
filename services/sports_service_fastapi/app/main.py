@@ -1,10 +1,15 @@
 # services/sports_service_fastapi/app/main.py
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
 from dotenv import load_dotenv
+from sqlalchemy.orm import Session
+from typing import List
+from contextlib import asynccontextmanager
 import os
+
+from .db import engine, Base, get_db
 
 # -------------------------------------------------------
 # Charger le fichier .env depuis la racine du projet
@@ -18,9 +23,22 @@ load_dotenv(ROOT_ENV)
 SPORTS_PORT = int(os.getenv("SPORTS_PORT") or os.getenv("PORT", "8002"))
 
 # -------------------------------------------------------
-# Création de l’application FastAPI
+# Lifespan: initialiser la base de données au démarrage
 # -------------------------------------------------------
-app = FastAPI(title="Sports Service")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    print("[SPORTS] Initialisation de la base PostgreSQL...")
+    Base.metadata.create_all(bind=engine)
+    print("[SPORTS] PostgreSQL OK.")
+    yield
+    # Shutdown (si nécessaire)
+    print("[SPORTS] Arrêt du service...")
+
+# -------------------------------------------------------
+# Création de l'application FastAPI
+# -------------------------------------------------------
+app = FastAPI(title="Sports Service", lifespan=lifespan)
 
 # -------------------------------------------------------
 # CORS : autoriser les appels du frontend Vite

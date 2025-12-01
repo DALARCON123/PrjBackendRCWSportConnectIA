@@ -10,7 +10,7 @@ import os
 import httpx
 
 from .tracking_db import init_db, get_conn      # SQLite pour le suivi
-from .firebase_client import db, fb_firestore   # Firestore (Firebase)
+from .mongodb_client import users_collection, recommendations_collection  # MongoDB pour les métriques
 
 # -------------------------------------------------------
 # Charger le fichier .env à la racine du projet
@@ -75,7 +75,7 @@ async def reco_health():
 # -------------------------------------------------------
 def build_question_from_profile(profile: Dict[str, Any]) -> str:
     """
-    Construit un descriptif du profil + consigne pour le coach IA.
+    Construit un descriptif du profil + consignes pour le coach IA.
     """
     name = profile.get("name", "l'utilisateur")
     age = profile.get("age")
@@ -154,30 +154,31 @@ async def generate_recommendation(req: RecoRequest):
     firestore_ok = True
     user_ref = None
 
-    # -------- 1) Lire ou créer le profil dans Firestore --------
+    # -------- 1) Lire ou créer le profil dans MongoDB --------
     try:
-        user_ref = db.collection("users").document(req.user_id)
-        snap = user_ref.get()
+        user_doc = users_collection.find_one({"_id": req.user_id})
 
-        if snap.exists:
-            data = snap.to_dict() or {}
-            # on fusionne les données Firestore avec les valeurs par défaut
+        if user_doc:
+            # on fusionne les données MongoDB avec les valeurs par défaut
             profile.update({
-                "name": data.get("name") or profile["name"],
-                "age": data.get("age", profile["age"]),
-                "weightKg": data.get("weightKg", profile["weightKg"]),
-                "heightCm": data.get("heightCm", profile["heightCm"]),
-                "mainGoal": data.get("mainGoal") or profile["mainGoal"],
-                "lang": data.get("lang") or profile["lang"],
+                "name": user_doc.get("name") or profile["name"],
+                "age": user_doc.get("age", profile["age"]),
+                "weightKg": user_doc.get("weightKg", profile["weightKg"]),
+                "heightCm": user_doc.get("heightCm", profile["heightCm"]),
+                "mainGoal": user_doc.get("mainGoal") or profile["mainGoal"],
+                "lang": user_doc.get("lang") or profile["lang"],
             })
         else:
             # si l'utilisateur n'existe pas, on le crée avec le profil par défaut
             print(f"[RECO] Utilisateur {req.user_id} absent → création profil par défaut.")
-            user_ref.set(default_profile, merge=True)
+            users_collection.insert_one({
+                "_id": req.user_id,
+                **default_profile
+            })
 
     except Exception as e:
-        # Si Firestore est down ou mal configuré, on continue quand même
-        print(f"[RECO] Erreur Firestore (lecture/écriture profil) : {e}")
+        # Si MongoDB est down ou mal configuré, on continue quand même
+        print(f"[RECO] Erreur MongoDB (lecture/écriture profil) : {e}")
         firestore_ok = False
 
     # langue finale (priorité : requête -> profil -> fr)
@@ -197,25 +198,26 @@ async def generate_recommendation(req: RecoRequest):
             detail="Erreur lors de la réponse IA depuis le chatbot."
         )
 
-    # -------- 4) Sauvegarder l'historique dans Firestore (si possible) --------
+    # -------- 4) Sauvegarder l'historique dans MongoDB (si possible) --------
     if firestore_ok and user_ref is not None:
         try:
-            reco_ref = user_ref.collection("recommendations").document()
+            from datetime import datetime
             reco_data = {
+                "user_id": req.user_id,
                 "question": question,
                 "answer": answer,
-                "createdAt": fb_firestore.SERVER_TIMESTAMP,
+                "createdAt": datetime.utcnow(),
                 "age": profile.get("age"),
                 "weightKg": profile.get("weightKg"),
                 "heightCm": profile.get("heightCm"),
                 "mainGoal": profile.get("mainGoal"),
                 "lang": lang,
             }
-            reco_ref.set(reco_data)
+            recommendations_collection.insert_one(reco_data)
             print(f"[RECO] Recommandation enregistrée pour user {req.user_id}.")
         except Exception as e:
             # On log l'erreur, mais on n'empêche pas la réponse au frontend
-            print(f"[RECO] Erreur Firestore en sauvegardant l'historique: {e}")
+            print(f"[RECO] Erreur MongoDB en sauvegardant l'historique: {e}")
 
     # -------- 5) Retourner la recommandation + le profil --------
     return {"answer": answer, "profile": profile}
@@ -228,25 +230,25 @@ async def get_history(user_id: str) -> List[Dict[str, Any]]:
     """
     Retourne la liste des recommandations passées d'un utilisateur,
     triées de la plus récente à la plus ancienne.
-    Si Firestore pose problème, on renvoie simplement une liste vide.
+    Si MongoDB pose problème, on renvoie simplement une liste vide.
     """
     history: List[Dict[str, Any]] = []
 
     try:
-        user_ref = db.collection("users").document(user_id)
-        docs = (
-            user_ref.collection("recommendations")
-            .order_by("createdAt", direction=fb_firestore.Query.DESCENDING)
-            .stream()
-        )
+        docs = recommendations_collection.find(
+            {"user_id": user_id}
+        ).sort("createdAt", -1)
 
-        for d in docs:
-            item = d.to_dict() or {}
-            item["id"] = d.id
-            history.append(item)
+        for doc in docs:
+            # Convertir ObjectId pour JSON
+            doc["id"] = str(doc.pop("_id"))
+            # Convertir datetime para ISO string
+            if "createdAt" in doc:
+                doc["createdAt"] = doc["createdAt"].isoformat()
+            history.append(doc)
 
     except Exception as e:
-        print(f"[RECO] Erreur Firestore get_history pour user {user_id}: {e}")
+        print(f"[RECO] Erreur MongoDB get_history pour user {user_id}: {e}")
         # on retourne quand même une liste vide pour éviter un 500
 
     return history

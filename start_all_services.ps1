@@ -23,7 +23,7 @@ $SERVICES = @(
   @{ Nom="authentification"; Dossier="auth_service_fastapi"; Port=8001; Module="app.main" },
   @{ Nom="sports";           Dossier="sports_service_fastapi"; Port=8002; Module="app.main" },
   @{ Nom="recommandation";   Dossier="reco_service_fastapi";   Port=8003; Module="app.main" },
-  @{ Nom="chatbot";          Dossier="chatbot_service_fastapi";Port=8010; Module="app.main" }
+  @{ Nom="chatbot";          Dossier="chatbot_service_fastapi";Port=8004; Module="app.main" }
 )
 
 Write-Host "==========================================="
@@ -49,10 +49,10 @@ cd "$CheminService"
 }
 
 Write-Host "-------------------------------------------"
-Write-Host "Tous les services ont été lancés."
+Write-Host "Tous les services ont ete lances."
 Write-Host "Tests rapides :"
 Write-Host "  http://127.0.0.1:8001/auth/health (Auth)"
 Write-Host "  http://127.0.0.1:8002/sports        (Sports)"
 Write-Host "  http://127.0.0.1:8003/reco/health   (Reco -> si defines endpoint)"
-Write-Host "  http://127.0.0.1:8010/chat/health   (Chat)"
+Write-Host "  http://127.0.0.1:8004/chat/health   (Chat)"
 Write-Host "-------------------------------------------"

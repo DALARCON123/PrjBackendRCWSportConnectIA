@@ -6,26 +6,24 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 from pathlib import Path
+from dotenv import load_dotenv
 import os
 
 # -------------------------------------------------------
-# Dossier courant (app) et chemin du fichier SQLite
-# Exemple : services/auth_service_fastapi/app/auth.db
+# Charger les variables d'environnement depuis le fichier .env
 # -------------------------------------------------------
-BASE_DIR = Path(__file__).resolve().parent
-DB_FILE = BASE_DIR / "auth.db"
+ROOT_ENV = Path(__file__).resolve().parents[3] / ".env"
+load_dotenv(ROOT_ENV)
 
-# URL de connexion SQLite (fichier local)
-SQLALCHEMY_DATABASE_URL = f"sqlite:///{DB_FILE}"
+# -------------------------------------------------------
+# URL de connexion PostgreSQL (pour les données des utilisateurs)
+# -------------------------------------------------------
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://admin:admin123@localhost:5432/sportconnect")
 
 # -------------------------------------------------------
 # Création du moteur SQLAlchemy
-# check_same_thread=False : nécessaire avec SQLite + FastAPI
 # -------------------------------------------------------
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL,
-    connect_args={"check_same_thread": False},
-)
+engine = create_engine(DATABASE_URL)
 
 # -------------------------------------------------------
 # SessionLocal : fabrique de sessions pour interagir avec la BD

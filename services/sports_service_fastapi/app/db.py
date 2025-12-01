@@ -1,33 +1,49 @@
-import sqlite3
+"""
+Database configuration for Sports Service
+Uses PostgreSQL for user data and objectives
+"""
+
+import os
 from pathlib import Path
+from dotenv import load_dotenv
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, declarative_base
 
-DB_PATH = Path(__file__).resolve().parent.parent / "sports.db"
+# -------------------------------------------------------
+# Charger les variables d'environnement depuis le fichier .env
+# -------------------------------------------------------
+ROOT_ENV = Path(__file__).resolve().parents[3] / ".env"
+load_dotenv(ROOT_ENV)
 
-def get_conn():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+# -------------------------------------------------------
+# URL de connexion PostgreSQL
+# -------------------------------------------------------
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://admin:admin123@localhost:5432/sportconnect")
 
-def init_db():
-    with get_conn() as c:
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS sports (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          name TEXT NOT NULL,
-          categorie TEXT
-        )
-        """)
-        # seed si está vacío
-        cur = c.execute("SELECT COUNT(*) AS n FROM sports").fetchone()
-        if cur["n"] == 0:
-            c.executemany(
-                "INSERT INTO sports(name,categorie) VALUES(?,?)",
-                [
-                    ("Football", "Équipe"),
-                    ("Basketball", "Équipe"),
-                    ("Tennis", "Individuel"),
-                    ("Natation", "Individuel"),
-                    ("Course", "Individuel"),
-                    ("Volleyball", "Équipe"),
-                ],
-            )
+# -------------------------------------------------------
+# Création du moteur SQLAlchemy
+# -------------------------------------------------------
+engine = create_engine(DATABASE_URL)
+
+# -------------------------------------------------------
+# SessionLocal : fabrique de sessions pour interagir avec la BD
+# -------------------------------------------------------
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# -------------------------------------------------------
+# Base : classe de base pour tous les modèles
+# -------------------------------------------------------
+Base = declarative_base()
+
+
+def get_db():
+    """
+    Ouvre une session de base de données pour la requête,
+    puis la ferme automatiquement après.
+    """
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
