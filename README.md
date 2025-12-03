@@ -35,3 +35,11 @@ Puis, vous pouvez lancer l'application avec la commande suivante:
 ```bash
 .\start_all_services.ps1
 ```
+
+## Mock Data
+
+Pour instancier les *mock data*, vous devez utiliser le commande suivante:
+
+```bash
+.\run_seeder.ps1
+```

@@ -24,13 +24,13 @@ if not MONGODB_URI:
     raise ValueError("MONGODB_URI non trouvée dans le fichier .env")
 
 # -------------------------------------------------------
-# Cliente MongoDB
+# Client MongoDB
 # -------------------------------------------------------
 client = MongoClient(MONGODB_URI)
 db = client[MONGODB_DB_NAME]
 
 # -------------------------------------------------------
-# Collections principais
+# Collections principales
 # -------------------------------------------------------
 users_collection = db["users"]
 recommendations_collection = db["recommendations"]

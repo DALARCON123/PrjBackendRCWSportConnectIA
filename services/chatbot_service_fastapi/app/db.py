@@ -5,7 +5,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 # -------------------------------------------------------
-# Carregar variáveis de ambiente do arquivo .env
+# Charger les variables d'environnement depuis le fichier .env
 # -------------------------------------------------------
 ROOT_ENV = Path(__file__).resolve().parents[3] / ".env"
 load_dotenv(ROOT_ENV)

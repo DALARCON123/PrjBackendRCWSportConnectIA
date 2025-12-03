@@ -9,8 +9,7 @@ from dotenv import load_dotenv
 import os
 import httpx
 
-from .tracking_db import init_db, get_conn      # SQLite pour le suivi
-from .mongodb_client import users_collection, recommendations_collection  # MongoDB pour les métriques
+from .mongodb_client import users_collection, recommendations_collection, health_metrics_collection  # MongoDB pour les métriques
 
 # -------------------------------------------------------
 # Charger le fichier .env à la racine du projet
@@ -48,13 +47,12 @@ app.add_middleware(
 )
 
 # -------------------------------------------------------
-# Initialiser la base SQLite au démarrage
+# Pas besoin d'initialiser SQLite, on utilise MongoDB
 # -------------------------------------------------------
 @app.on_event("startup")
 def bootstrap():
-    print("[RECO] Initialisation de la base SQLite…")
-    init_db()
-    print("[RECO] SQLite OK.")
+    print("[RECO] Service démarré. Utilisation de MongoDB pour le tracking.")
+    print("[RECO] Collections: users, recommendations, health_metrics")
 
 # -------------------------------------------------------
 # Modèle d’entrée : demande de recommandation
@@ -254,7 +252,7 @@ async def get_history(user_id: str) -> List[Dict[str, Any]]:
     return history
 
 # -------------------------------------------------------
-# Modèles pour mesures corporelles (SQLite)
+# Modèles pour mesures corporelles (MongoDB)
 # -------------------------------------------------------
 class MeasurementIn(BaseModel):
     date: str
@@ -264,59 +262,68 @@ class MeasurementIn(BaseModel):
     chest_cm: Optional[float] = None
     notes: Optional[str] = None
 
-class MeasurementOut(MeasurementIn):
-    id: int
+class MeasurementOut(BaseModel):
+    id: str
+    email: str
+    date: str
+    weight_kg: Optional[float] = None
+    waist_cm: Optional[float] = None
+    hips_cm: Optional[float] = None
+    chest_cm: Optional[float] = None
+    notes: Optional[str] = None
 
 # -------------------------------------------------------
 # Obtenir toutes les mesures pour un utilisateur
 # -------------------------------------------------------
 @app.get("/tracking/measurements", response_model=List[MeasurementOut])
 def get_measurements(email: str = Query(...)):
-    with get_conn() as c:
-        cur = c.cursor()
-        cur.execute(
-            """
-            SELECT id, date, weight_kg, waist_cm, hips_cm, chest_cm, notes
-            FROM measurements
-            WHERE email=?
-            ORDER BY date DESC, id DESC
-            """,
-            (email.lower(),),
-        )
-        rows = [dict(r) for r in cur.fetchall()]
-    return rows
+    """
+    Retourne toutes les mesures corporelles d'un utilisateur depuis MongoDB
+    """
+    try:
+        measurements = health_metrics_collection.find(
+            {"email": email.lower()}
+        ).sort("date", -1)
+        
+        result = []
+        for doc in measurements:
+            doc["id"] = str(doc.pop("_id"))
+            result.append(doc)
+        
+        return result
+    except Exception as e:
+        print(f"[RECO] Erreur lors de la récupération des mesures: {e}")
+        raise HTTPException(500, f"Erreur serveur: {e}")
 
 # -------------------------------------------------------
 # Ajouter une nouvelle mesure
 # -------------------------------------------------------
 @app.post("/tracking/measurements", response_model=dict)
 def add_measurement(email: str, body: MeasurementIn):
+    """
+    Ajoute une nouvelle mesure corporelle dans MongoDB
+    """
     if not body.date:
         raise HTTPException(400, "date is required")
 
-    with get_conn() as c:
-        cur = c.cursor()
-        cur.execute(
-            """
-            INSERT INTO measurements(
-                email, date, weight_kg, waist_cm, hips_cm, chest_cm, notes
-            )
-            VALUES(?,?,?,?,?,?,?)
-            """,
-            (
-                email.lower(),
-                body.date,
-                body.weight_kg,
-                body.waist_cm,
-                body.hips_cm,
-                body.chest_cm,
-                body.notes,
-            ),
-        )
-        c.commit()
-        new_id = cur.lastrowid
-
-    return {"ok": True, "id": new_id}
+    try:
+        measurement_data = {
+            "email": email.lower(),
+            "date": body.date,
+            "weight_kg": body.weight_kg,
+            "waist_cm": body.waist_cm,
+            "hips_cm": body.hips_cm,
+            "chest_cm": body.chest_cm,
+            "notes": body.notes or ""
+        }
+        
+        result = health_metrics_collection.insert_one(measurement_data)
+        new_id = str(result.inserted_id)
+        
+        return {"ok": True, "id": new_id}
+    except Exception as e:
+        print(f"[RECO] Erreur lors de l'ajout de la mesure: {e}")
+        raise HTTPException(500, f"Erreur serveur: {e}")
 
 # -------------------------------------------------------
 # Exécuter le service directement (mode local)
