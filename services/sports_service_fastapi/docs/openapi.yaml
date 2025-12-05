@@ -1,0 +1,55 @@
+openapi: 3.0.3
+info:
+  title: API des Sports SportConnectIA
+  version: 1.0.0
+  description: |
+    Catalogue des disciplines sportives, ligues et événements.
+servers:
+  - url: http://localhost:8002
+paths:
+  /sports:
+    get:
+      summary: Obtenir la liste des sports disponibles
+      parameters:
+        - in: query
+          name: q
+          schema: { type: string }
+          description: Rechercher par nom
+      responses:
+        "200":
+          description: Liste des sports
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: integer }
+                    nom: { type: string }
+                    categorie: { type: string }
+
+  /sports/{id}:
+    get:
+      summary: Détails d’un sport
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200": { description: Détails complets du sport }
+        "404": { description: Sport non trouvé }
+
+  /sports/events:
+    get:
+      summary: Liste des événements sportifs
+      parameters:
+        - in: query
+          name: date
+          schema: { type: string, format: date }
+        - in: query
+          name: league
+          schema: { type: string }
+      responses:
+        "200": { description: Liste d’événements filtrés }
