@@ -1,20 +1,52 @@
-import sqlite3
+# app/db.py
+# -------------------------------------------------------
+# Configuration de la base de données avec SQLAlchemy
+# -------------------------------------------------------
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, declarative_base
 from pathlib import Path
+from dotenv import load_dotenv
+import os
 
-DB_PATH = Path(__file__).resolve().parent.parent / "auth.db"
+# -------------------------------------------------------
+# Charger les variables d'environnement depuis le fichier .env
+# -------------------------------------------------------
+ROOT_ENV = Path(__file__).resolve().parents[3] / ".env"
+load_dotenv(ROOT_ENV)
 
-def get_conn():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+# -------------------------------------------------------
+# URL de connexion PostgreSQL (pour les données des utilisateurs)
+# -------------------------------------------------------
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://admin:admin123@localhost:5432/sportconnect")
 
-def init_db():
-    with get_conn() as c:
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            email TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            password_hash TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """)
+# -------------------------------------------------------
+# Création du moteur SQLAlchemy
+# -------------------------------------------------------
+engine = create_engine(DATABASE_URL)
+
+# -------------------------------------------------------
+# SessionLocal : fabrique de sessions pour interagir avec la BD
+# -------------------------------------------------------
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# -------------------------------------------------------
+# Base : classe de base pour tous les modèles (User, Notification, etc.)
+# C'est cet objet que tu importes dans models.py
+# -------------------------------------------------------
+Base = declarative_base()
+
+
+# -------------------------------------------------------
+# Dépendance FastAPI : obtenir une session de BD par requête
+# -------------------------------------------------------
+def get_db():
+    """
+    Ouvre une session de base de données pour la requête,
+    puis la ferme automatiquement après.
+    """
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()

@@ -3,20 +3,26 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
+# -------------------------------------------------------
+# Chemin de la base SQLite (tracking.db)
+# -------------------------------------------------------
 DB_PATH = Path(__file__).resolve().parent.parent / "tracking.db"
 
-
+# -------------------------------------------------------
+# Ouvre une connexion SQLite et active l’accès par nom de colonne
+# -------------------------------------------------------
 def get_conn():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
-
+# -------------------------------------------------------
+# Initialise la base : création de la table measurements
+# -------------------------------------------------------
 def init_db():
     with closing(get_conn()) as c:
         cur = c.cursor()
-        cur.execute(
-            """
+        cur.execute("""
         CREATE TABLE IF NOT EXISTS measurements(
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           email TEXT NOT NULL,
@@ -27,20 +33,6 @@ def init_db():
           chest_cm REAL,
           notes TEXT
         );
-        """
-        )
-        cur.execute(
-            """
-        CREATE TABLE IF NOT EXISTS recommendations(
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          user_id TEXT NOT NULL,
-          email TEXT NOT NULL,
-          type TEXT NOT NULL,
-          content TEXT NOT NULL,
-          created_at TEXT NOT NULL,
-          metadata TEXT
-        );
-        """
-        )
-        # si luego quieres más tablas (workouts, nutrition_logs), agrégalas aquí
+        """)
+        # Plus tard : ajouter d’autres tables si nécessaire
         c.commit()

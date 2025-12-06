@@ -1,7 +1,6 @@
 # ============================================================
 # Script : start_all_services.ps1
 # Objectif : Démarrer tous les microservices FastAPI (Auth, Sports, Reco, Chat)
-# Compatibilité : Windows PowerShell 5.1 (pas d'opérateur ternaire)
 # ============================================================
 
 $ErrorActionPreference = "Stop"
@@ -9,7 +8,7 @@ $ErrorActionPreference = "Stop"
 # 1) Racine = dossier où se trouve CE script
 $RACINE = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-# 2) Déterminer le Python à utiliser (venv si présent, sinon python global)
+# 2) Python (venv si présent, sinon python global)
 $PY_VENV = Join-Path $RACINE "venv\Scripts\python.exe"
 if (Test-Path $PY_VENV) {
   $PYTHON = $PY_VENV
@@ -27,16 +26,6 @@ $SERVICES = @(
   @{ Nom="chatbot";          Dossier="chatbot_service_fastapi";Port=8004; Module="app.main" }
 )
 
-function Copier-EnvSiManquant {
-  param([string]$CheminService)
-  $envFile    = Join-Path $CheminService ".env"
-  $envExample = Join-Path $CheminService ".env.example"
-  if (!(Test-Path $envFile) -and (Test-Path $envExample)) {
-    Copy-Item $envExample $envFile -Force
-    Write-Host "Fichier .env créé depuis .env.example → $CheminService" -ForegroundColor DarkGray
-  }
-}
-
 Write-Host "==========================================="
 Write-Host "DÉMARRAGE DES MICROSERVICES FASTAPI" -ForegroundColor Green
 Write-Host "Racine du projet : $RACINE" -ForegroundColor DarkGray
@@ -50,9 +39,6 @@ foreach ($svc in $SERVICES) {
     continue
   }
 
-  Copier-EnvSiManquant -CheminService $CheminService
-
-  # Commande à exécuter dans une nouvelle fenêtre PowerShell
   $commande = @"
 cd "$CheminService"
 & "$PYTHON" -m $($svc.Module)
@@ -63,11 +49,10 @@ cd "$CheminService"
 }
 
 Write-Host "-------------------------------------------"
-Write-Host "Tous les services ont été lancés."
-Write-Host "Frontend : exécuter 'npm run dev' dans le projet Vite (http://localhost:5173)"
+Write-Host "Tous les services ont ete lances."
 Write-Host "Tests rapides :"
 Write-Host "  http://127.0.0.1:8001/auth/health (Auth)"
-Write-Host "  http://127.0.0.1:8002/sports/health (Sports)"
-Write-Host "  http://127.0.0.1:8003/reco/health   (Reco)"
+Write-Host "  http://127.0.0.1:8002/sports        (Sports)"
+Write-Host "  http://127.0.0.1:8003/reco/health   (Reco -> si defines endpoint)"
 Write-Host "  http://127.0.0.1:8004/chat/health   (Chat)"
 Write-Host "-------------------------------------------"

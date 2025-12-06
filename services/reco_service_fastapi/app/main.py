@@ -1,84 +1,259 @@
+# services/reco_service_fastapi/app/main.py
+
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Optional
-from datetime import datetime, date
-import json
-import os
-import smtplib
-from email.mime.text import MIMEText
+from typing import List, Optional, Any, Dict
+from pathlib import Path
 from dotenv import load_dotenv
-from contextlib import asynccontextmanager
+import os
+import httpx
 
-from .tracking_db import init_db, get_conn
+from .mongodb_client import users_collection, recommendations_collection, health_metrics_collection  # MongoDB pour les métriques
 
-load_dotenv()
+# -------------------------------------------------------
+# Charger le fichier .env à la racine du projet
+# -------------------------------------------------------
+ROOT_ENV = Path(__file__).resolve().parents[3] / ".env"
+load_dotenv(ROOT_ENV)
 
-# === Inicializar BD ao arrancar ===
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    init_db()
-    yield
-  
+RECO_PORT = int(os.getenv("RECO_PORT") or os.getenv("PORT", "8003"))
+CHATBOT_URL = os.getenv(
+    "CHATBOT_URL",
+    "http://localhost:8010/chat/ask"
+).rstrip("/")
 
-app = FastAPI(lifespan=lifespan)
+print(f"[RECO] CHATBOT_URL = {CHATBOT_URL}")
 
+# -------------------------------------------------------
+# Création de l’application FastAPI
+# -------------------------------------------------------
+app = FastAPI(title="Reco Service")
+
+# -------------------------------------------------------
+# CORS pour permettre les appels du frontend Vite
+# -------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# -------------------------------------------------------
+# Pas besoin d'initialiser SQLite, on utilise MongoDB
+# -------------------------------------------------------
+@app.on_event("startup")
+def bootstrap():
+    print("[RECO] Service démarré. Utilisation de MongoDB pour le tracking.")
+    print("[RECO] Collections: users, recommendations, health_metrics")
 
+# -------------------------------------------------------
+# Modèle d’entrée : demande de recommandation
+# -------------------------------------------------------
+class RecoRequest(BaseModel):
+    user_id: str
+    lang: Optional[str] = None
 
+# -------------------------------------------------------
+# Route santé du service
+# -------------------------------------------------------
+@app.get("/reco/health")
+async def reco_health():
+    return {"status": "ok", "service": "reco"}
 
-# ------------ FUNÇÃO AUXILIAR PARA EMAIL ------------
+# -------------------------------------------------------
+# Construire une question selon le profil (Firestore ou défaut)
+# -------------------------------------------------------
+def build_question_from_profile(profile: Dict[str, Any]) -> str:
+    """
+    Construit un descriptif du profil + consignes pour le coach IA.
+    """
+    name = profile.get("name", "l'utilisateur")
+    age = profile.get("age")
+    weight = profile.get("weightKg")
+    height = profile.get("heightCm")
+    goal = profile.get("mainGoal", "")
 
-def send_email_smtp(to_email: str, subject: str, body: str):
-    host = os.getenv("SMTP_HOST")
-    port = int(os.getenv("SMTP_PORT", "587"))
-    username = os.getenv("SMTP_USER")
-    password = os.getenv("SMTP_PASS")
-    from_email = os.getenv("FROM_EMAIL") or username or "no-reply@sportconnectia.local"
+    parts = [f"Profil de l'utilisateur {name} :"]
+    if age is not None:
+        parts.append(f"- Âge : {age} ans")
+    if weight is not None:
+        parts.append(f"- Poids : {weight} kg")
+    if height is not None:
+        parts.append(f"- Taille : {height} cm")
+    if goal:
+        parts.append(f"- Objectif principal : {goal}")
 
-    # aqui usamos o parâmetro `body`, que no seu caso já é HTML
-    msg = MIMEText(body, "html", "utf-8")
-    msg["Subject"] = subject
-    msg["From"] = from_email
-    msg["To"] = to_email
+    parts.append(
+        "\nSur ce profil, donne :\n"
+        "1) un plan d'entraînement simple (3 à 5 séances par semaine max),\n"
+        "2) quelques conseils d’alimentation et d’hydratation,\n"
+        "3) un conseil de récupération / sommeil / motivation.\n"
+        "Sois concret mais prudent : intensité progressive, échauffement, "
+        "étirements légers et recommandation de consulter un professionnel "
+        "de la santé en cas de douleur ou de condition médicale."
+    )
+    return "\n".join(parts)
 
-    # 1) Se NÃO houver SMTP configurado → modo DEBUG
-    if not host or not username or not password:
-        print("=== DEBUG EMAIL SPORTCONNECTIA ===")
-        print(f"To: {to_email}")
-        print(f"Subject: {subject}")
-        print("Body:\n", body)
-        print("=== FIN DEBUG EMAIL ===")
-        return
-
-    # 2) Envio real via SMTP
+# -------------------------------------------------------
+# Appel au microservice chatbot pour générer la réponse IA
+# -------------------------------------------------------
+async def call_chatbot(message: str, lang: str) -> str:
+    """
+    Appelle le service /chat/ask.
+    Retourne la réponse texte, ou "" en cas de problème.
+    """
     try:
-        with smtplib.SMTP(host, port, timeout=30) as server:
-            server.starttls()
-            server.login(username, password)
-            server.send_message(msg)
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(
+                CHATBOT_URL,
+                json={"message": message, "lang": lang},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            answer = (data.get("answer") or "").strip()
+            print(f"[RECO] Réponse chatbot (extrait) -> {answer[:80]}...")
+            return answer
+    except Exception as e:
+        print(f"[RECO] Erreur en appelant le chatbot: {e}")
+        return ""
 
-        print("✅ E-mail enviado via SMTP para", to_email)
+# -------------------------------------------------------
+# Endpoint principal : générer recommandation IA
+# -------------------------------------------------------
+@app.post("/reco/generate")
+async def generate_recommendation(req: RecoRequest):
+    """
+    1) Lit (ou crée) un profil utilisateur dans Firestore
+    2) Construit une question détaillée pour le Coach IA
+    3) Appelle le microservice chatbot
+    4) Sauvegarde la recommandation dans Firestore (si possible)
+    5) Retourne { answer, profile } au frontend
+    """
+
+    # -------- Profil par défaut (mêmes valeurs que dans le frontend) --------
+    default_profile: Dict[str, Any] = {
+        "name": "SportConnectIA",
+        "age": 39,
+        "weightKg": 64,
+        "heightCm": 160,
+        "mainGoal": "Perte de poids",
+        "lang": "fr",
+    }
+
+    profile: Dict[str, Any] = default_profile.copy()
+    firestore_ok = True
+    user_ref = None
+
+    # -------- 1) Lire ou créer le profil dans MongoDB --------
+    try:
+        user_doc = users_collection.find_one({"_id": req.user_id})
+
+        if user_doc:
+            # on fusionne les données MongoDB avec les valeurs par défaut
+            profile.update({
+                "name": user_doc.get("name") or profile["name"],
+                "age": user_doc.get("age", profile["age"]),
+                "weightKg": user_doc.get("weightKg", profile["weightKg"]),
+                "heightCm": user_doc.get("heightCm", profile["heightCm"]),
+                "mainGoal": user_doc.get("mainGoal") or profile["mainGoal"],
+                "lang": user_doc.get("lang") or profile["lang"],
+            })
+        else:
+            # si l'utilisateur n'existe pas, on le crée avec le profil par défaut
+            print(f"[RECO] Utilisateur {req.user_id} absent → création profil par défaut.")
+            users_collection.insert_one({
+                "_id": req.user_id,
+                **default_profile
+            })
 
     except Exception as e:
-        print("Erro ao enviar e-mail via SMTP, caindo em modo DEBUG:", e)
-        print("=== DEBUG EMAIL SPORTCONNECTIA (FALLBACK) ===")
-        print(f"To: {to_email}")
-        print(f"Subject: {subject}")
-        print("Body:\n", body)
-        print("=== FIN DEBUG EMAIL (FALLBACK) ===")
+        # Si MongoDB est down ou mal configuré, on continue quand même
+        print(f"[RECO] Erreur MongoDB (lecture/écriture profil) : {e}")
+        firestore_ok = False
 
+    # langue finale (priorité : requête -> profil -> fr)
+    lang = (req.lang or profile.get("lang") or "fr").lower()
 
+    # -------- 2) Construire la question pour le Coach IA --------
+    question = build_question_from_profile(profile)
+    print(f"[RECO] Question envoyée au chatbot:\n{question}")
 
-# ------------ MODELOS TRACKING ------------
+    # -------- 3) Appeler le microservice chatbot --------
+    answer = await call_chatbot(question, lang)
+    if not answer:
+        # Ici on renvoie une erreur 500 au frontend
+        # (le frontend affiche ton message rouge)
+        raise HTTPException(
+            status_code=500,
+            detail="Erreur lors de la réponse IA depuis le chatbot."
+        )
 
+    # -------- 4) Sauvegarder l'historique dans MongoDB (si possible) --------
+    if firestore_ok and user_ref is not None:
+        try:
+            from datetime import datetime
+            reco_data = {
+                "user_id": req.user_id,
+                "question": question,
+                "answer": answer,
+                "createdAt": datetime.utcnow(),
+                "age": profile.get("age"),
+                "weightKg": profile.get("weightKg"),
+                "heightCm": profile.get("heightCm"),
+                "mainGoal": profile.get("mainGoal"),
+                "lang": lang,
+            }
+            recommendations_collection.insert_one(reco_data)
+            print(f"[RECO] Recommandation enregistrée pour user {req.user_id}.")
+        except Exception as e:
+            # On log l'erreur, mais on n'empêche pas la réponse au frontend
+            print(f"[RECO] Erreur MongoDB en sauvegardant l'historique: {e}")
+
+    # -------- 5) Retourner la recommandation + le profil --------
+    return {"answer": answer, "profile": profile}
+
+# -------------------------------------------------------
+# Obtenir l’historique des recommandations IA
+# -------------------------------------------------------
+@app.get("/reco/history/{user_id}")
+async def get_history(user_id: str) -> List[Dict[str, Any]]:
+    """
+    Retourne la liste des recommandations passées d'un utilisateur,
+    triées de la plus récente à la plus ancienne.
+    Si MongoDB pose problème, on renvoie simplement une liste vide.
+    """
+    history: List[Dict[str, Any]] = []
+
+    try:
+        docs = recommendations_collection.find(
+            {"user_id": user_id}
+        ).sort("createdAt", -1)
+
+        for doc in docs:
+            # Convertir ObjectId pour JSON
+            doc["id"] = str(doc.pop("_id"))
+            # Convertir datetime para ISO string
+            if "createdAt" in doc:
+                doc["createdAt"] = doc["createdAt"].isoformat()
+            history.append(doc)
+
+    except Exception as e:
+        print(f"[RECO] Erreur MongoDB get_history pour user {user_id}: {e}")
+        # on retourne quand même une liste vide pour éviter un 500
+
+    return history
+
+# -------------------------------------------------------
+# Modèles pour mesures corporelles (MongoDB)
+# -------------------------------------------------------
 class MeasurementIn(BaseModel):
     date: str
     weight_kg: Optional[float] = None
@@ -87,434 +262,72 @@ class MeasurementIn(BaseModel):
     chest_cm: Optional[float] = None
     notes: Optional[str] = None
 
-
-class MeasurementOut(MeasurementIn):
-    id: int
-
-
-# ------------ MODELOS RECOMENDACIONES ----------
-
-class RecommendationRequest(BaseModel):
-    user_id: str
-    email: Optional[str] = None
-    type: Optional[str] = None  # e.g., "nutrition", "workout", "general"
-    lang: Optional[str] = None
-    age: Optional[int] = None
+class MeasurementOut(BaseModel):
+    id: str
+    email: str
+    date: str
     weight_kg: Optional[float] = None
-    height_cm: Optional[float] = None
-    main_goal: Optional[str] = None
-    days_per_week: Optional[int] = None
-    minutes_per_session: Optional[int] = None
-    level: Optional[str] = None
-    data: Optional[dict] = None
+    waist_cm: Optional[float] = None
+    hips_cm: Optional[float] = None
+    chest_cm: Optional[float] = None
+    notes: Optional[str] = None
 
+# -------------------------------------------------------
+# Obtenir toutes les mesures pour un utilisateur
+# -------------------------------------------------------
+@app.get("/tracking/measurements", response_model=List[MeasurementOut])
+def get_measurements(email: str = Query(...)):
+    """
+    Retourne toutes les mesures corporelles d'un utilisateur depuis MongoDB
+    """
+    try:
+        measurements = health_metrics_collection.find(
+            {"email": email.lower()}
+        ).sort("date", -1)
+        
+        result = []
+        for doc in measurements:
+            doc["id"] = str(doc.pop("_id"))
+            result.append(doc)
+        
+        return result
+    except Exception as e:
+        print(f"[RECO] Erreur lors de la récupération des mesures: {e}")
+        raise HTTPException(500, f"Erreur serveur: {e}")
 
-class RecommendationOut(BaseModel):
-    id: int
-    user_id: str
-    email: str
-    type: str
-    content: str
-    created_at: str
-    metadata: Optional[dict] = None
-
-
-class EmailReportRequest(BaseModel):
-    user_id: str
-    email: str
-    name: Optional[str] = None
-    lang: Optional[str] = None
-
-
-# ------------ ENDPOINTS TRACKING ------------
-
+# -------------------------------------------------------
+# Ajouter une nouvelle mesure
+# -------------------------------------------------------
 @app.post("/tracking/measurements", response_model=dict)
-def add_measurement(
-    email: str = Query(...),      # vem de ?email=...
-    body: MeasurementIn = ...,    # vem do JSON
-):
+def add_measurement(email: str, body: MeasurementIn):
+    """
+    Ajoute une nouvelle mesure corporelle dans MongoDB
+    """
     if not body.date:
-        raise HTTPException(status_code=400, detail="date is required")
+        raise HTTPException(400, "date is required")
 
     try:
-        with get_conn() as c:
-            cur = c.cursor()
-            cur.execute(
-                """
-                INSERT INTO measurements(email, date, weight_kg, waist_cm, hips_cm, chest_cm, notes)
-                VALUES(?,?,?,?,?,?,?)
-                """,
-                (
-                    email.lower(),
-                    body.date,
-                    body.weight_kg,
-                    body.waist_cm,
-                    body.hips_cm,
-                    body.chest_cm,
-                    body.notes,
-                ),
-            )
-            c.commit()
-            new_id = cur.lastrowid
-
+        measurement_data = {
+            "email": email.lower(),
+            "date": body.date,
+            "weight_kg": body.weight_kg,
+            "waist_cm": body.waist_cm,
+            "hips_cm": body.hips_cm,
+            "chest_cm": body.chest_cm,
+            "notes": body.notes or ""
+        }
+        
+        result = health_metrics_collection.insert_one(measurement_data)
+        new_id = str(result.inserted_id)
+        
         return {"ok": True, "id": new_id}
     except Exception as e:
-        print(" Erro ao inserir measurement:", e)
-        raise HTTPException(
-            status_code=500,
-            detail=f"DB error while saving measurement: {str(e)}",
-        )
+        print(f"[RECO] Erreur lors de l'ajout de la mesure: {e}")
+        raise HTTPException(500, f"Erreur serveur: {e}")
 
-
-# ------------ ENDPOINTS RECOMENDACIONES ----------
-
-@app.post("/reco/generate", response_model=dict)
-def generate_recommendation(body: RecommendationRequest):
-    """
-    Gera uma recomendação "fixa" baseada nos dados do usuário
-    e TENTA salvar no SQLite. Mesmo que o save falhe, SEMPRE retorna a recomendação.
-    """
-
-    # Usar email do body ou gerar um fake interno (não é destino do e-mail!)
-    email = body.email or f"user_{body.user_id}@sportconnect.local"
-
-    # Determinar tipo de recomendación
-    reco_type = body.type or body.main_goal or "general"
-
-    goal = body.main_goal or "remise en forme"
-    days = body.days_per_week or 3
-    minutes = body.minutes_per_session or 45
-
-    content = f"""**Plan:**
-Salut ! Je peux t'aider à atteindre tes objectifs de {goal} avec un programme d'entraînement simple, progressif et adapté à ton niveau, accompagné de conseils nutritionnels et de récupération.
-
-**Plan d'entraînement ({days} séances par semaine max):**
-*Lundi:** {minutes} minutes de marche rapide ou de vélo léger, suivies de quelques étirements.
-*Mercredi:** {minutes} minutes de HIIT (High Intensity Interval Training) avec des exercices comme jumping jacks, burpees modifiés et montées de genoux.
-*Vendredi:** {minutes} minutes de cardio doux (vélo elliptique, natation ou marche en côte) + 5–10 minutes d'étirements.
-
-**Conseils d'alimentation et d'hydratation:**
-*Hydratez-vous:** Buvez de l'eau régulièrement tout au long de la journée, surtout avant, pendant et après l'exercice.
-*Mangez des aliments riches en protéines:** Poulet, poisson, œufs, légumineuses et yaourts pour soutenir la masse musculaire.
-*Priorisez les fruits et légumes:** Ils apportent fibres, vitamines et minéraux essentiels.
-*Limitez les aliments ultra-transformés:** Snacks industriels, boissons sucrées et fast-foods.
-*Contrôlez les portions:** Mange lentement, en écoutant tes sensations de faim et de satiété.
-
-**Conseil de récupération/sommeil/motivation:**
-*Dormez suffisamment:** 7 à 8 heures de sommeil réparateur par nuit.
-*Gérez le stress:** Pratique des activités relaxantes comme la méditation, la respiration profonde ou le yoga doux.
-*Fixe-toi des objectifs réalistes:** Commence petit, progresse étape par étape et célèbre chaque petite victoire.
-
-**Important:**
-Avant de commencer un nouveau programme d'entraînement, il est toujours recommandé de consulter un professionnel de la santé, surtout en cas de problème médical. Adapte l'intensité selon ton ressenti et n'hésite pas à redemander une nouvelle recommandation si tes objectifs évoluent.
-"""
-
-    metadata_dict = {
-        "age": body.age,
-        "weight_kg": body.weight_kg,
-        "height_cm": body.height_cm,
-        "main_goal": body.main_goal,
-        "level": body.level,
-        "lang": body.lang,
-    }
-
-    now_iso = datetime.utcnow().isoformat()
-    new_id = None
-
-    # TENTA salvar na BD, mas NÃO quebra se der erro
-    try:
-        with get_conn() as c:
-            cur = c.cursor()
-            metadata_json = json.dumps(metadata_dict)
-            cur.execute(
-                """
-                INSERT INTO recommendations(user_id, email, type, content, created_at, metadata)
-                VALUES(?,?,?,?,?,?)
-                """,
-                (
-                    body.user_id,
-                    email.lower(),
-                    reco_type,
-                    content,
-                    now_iso,
-                    metadata_json,
-                ),
-            )
-            c.commit()
-            new_id = cur.lastrowid
-    except Exception as e:
-        print("⚠️ ERRO AO SALVAR RECOMENDAÇÃO NO SQLITE:", e)
-
-    # Mesmo que o INSERT dê erro, devolvemos a recomendação pro frontend
-    return {
-        "ok": True,
-        "id": new_id,
-        "type": reco_type,
-        "content": content,
-        "answer": content,
-        "created_at": now_iso,
-        "metadata": metadata_dict,
-    }
-
-
-@app.post("/reco/send-report", response_model=dict)
-def send_daily_report(body: EmailReportRequest):
-
-    email = body.email.lower()
-    today_str = date.today().isoformat()
-
-    try:
-        with get_conn() as c:
-            cur = c.cursor()
-
-            cur.execute(
-                """
-                SELECT date, weight_kg, waist_cm, hips_cm, chest_cm, notes
-                FROM measurements
-                WHERE email=? AND date=?
-                ORDER BY id DESC
-                """,
-                (email, today_str),
-            )
-            measures_today = [dict(r) for r in cur.fetchall()]
-
-            cur.execute(
-                """
-                SELECT id, content, created_at
-                FROM recommendations
-                WHERE user_id=? AND email=?
-                ORDER BY created_at DESC
-                LIMIT 1
-                """,
-                (body.user_id, email),
-            )
-            last_reco_row = cur.fetchone()
-
-    except Exception as e:
-        print("⚠️ ERRO AO LER DADOS PARA /reco/send-report:", e)
-        measures_today = []
-        last_reco_row = None
-
-    raw_name = (body.name or email.split("@")[0]).strip()
-    civ = "Mme" if raw_name.lower().endswith("a") else "M"
-    salutation = f"Bonjour {civ} {raw_name}"
-
-    # ------------------ CORREÇÃO 1: mesures_txt ------------------
-    if measures_today:
-        m = measures_today[0]
-        mesures_txt = (
-            f"- Date : {m['date']}\n"
-            f"- Poids (kg) : {m.get('weight_kg', '—')}\n"
-            f"- Tour de taille (cm) : {m.get('waist_cm', '—')}\n"
-            f"- Tour de hanches (cm) : {m.get('hips_cm', '—')}\n"
-            f"- Tour de poitrine (cm) : {m.get('chest_cm', '—')}\n"
-        )
-        if m.get("notes"):
-            mesures_txt += f"- Notes : {m['notes']}\n"
-    else:
-        mesures_txt = "Aucune mesure enregistrée aujourd'hui.\n"
-
-    # ------------------ CORREÇÃO 2: reco_txt ------------------
-    if last_reco_row:
-        last_reco = dict(last_reco_row)
-        reco_txt = last_reco["content"]
-        reco_date = last_reco["created_at"]
-    else:
-        reco_txt = "Aucune recommandation enregistrée pour le moment."
-        reco_date = "—"
-
-    # ------------------ CORREÇÃO 3: preparar HTML antes ------------------
-    mesures_html = mesures_txt.replace("\n", "<br>")
-    reco_html = reco_txt.replace("\n", "<br>")
-
-    # ------------------ CORREÇÃO 4: usar as variáveis no HTML ------------------
-    body_html = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-    <meta charset="UTF-8" />
-    <style>
-        body {{
-        font-family: Arial, sans-serif;
-        background: #f4f7fb;
-        padding: 0;
-        margin: 0;
-        }}
-        .container {{
-        max-width: 600px;
-        background: #ffffff;
-        margin: 20px auto;
-        border-radius: 16px;
-        padding: 24px 28px;
-        border: 1px solid #e5e7eb;
-        box-shadow: 0 4px 14px rgba(0,0,0,0.08);
-        }}
-        h1 {{
-        color: #1e3a8a;
-        font-size: 20px;
-        margin-bottom: 12px;
-        }}
-        .section-title {{
-        font-size: 16px;
-        font-weight: bold;
-        color: #be185d;
-        margin-top: 24px;
-        margin-bottom: 8px;
-        }}
-        .metrics-box {{
-        background: #fdf2f8;
-        border-left: 5px solid #ec4899;
-        padding: 12px 16px;
-        border-radius: 10px;
-        font-size: 14px;
-        line-height: 1.4;
-        }}
-        .reco-box {{
-        background: #eff6ff;
-        border-left: 5px solid #3b82f6;
-        padding: 12px 16px;
-        border-radius: 10px;
-        font-size: 14px;
-        white-space: pre-line;
-        line-height: 1.4;
-        }}
-        .footer {{
-        margin-top: 28px;
-        font-size: 12px;
-        color: #6b7280;
-        text-align: center;
-        }}
-    </style>
-    </head>
-
-    <body>
-    <div class="container">
-        <h1>🏋️‍♀️ SportConnectIA – Rapport Quotidien</h1>
-
-        <p>{salutation},</p>
-        <p>Voici ton rapport SportConnectIA pour aujourd’hui <strong>({today_str})</strong>.</p>
-
-        <div class="section-title">1) Résumé de tes mesures du jour</div>
-        <div class="metrics-box">
-            {mesures_html}
-        </div>
-
-        <div class="section-title">2) Dernière recommandation IA</div>
-        <p style="font-size:12px; color:#6b7280; margin-bottom:4px;">
-        Générée le {reco_date}
-        </p>
-        <div class="reco-box">
-            {reco_html}
-        </div>
-
-        <p class="footer">
-        Merci de ta confiance 💙<br>
-        L'équipe SportConnectIA 🤖💪
-        </p>
-    </div>
-    </body>
-    </html>
-    """
-
-    subject = "Ton rapport quotidien SportConnectIA"
-
-    try:
-        send_email_smtp(email, subject, body_html)
-        return {"ok": True, "message": "Rapport envoyé"}
-    except Exception as e:
-        print("⚠️ ERRO AO ENVIAR E-MAIL EM /reco/send-report:", e)
-        return {"ok": False, "message": "Erreur interne lors de l'envoi du rapport."}
-
-
-@app.get("/reco/history/{user_id}", response_model=List[RecommendationOut])
-def get_recommendation_history(user_id: str, email: str = Query(None)):
-    try:
-        with get_conn() as c:
-            cur = c.cursor()
-            if email:
-                cur.execute(
-                    """
-                    SELECT id, user_id, email, type, content, created_at, metadata
-                    FROM recommendations
-                    WHERE user_id=? AND email=?
-                    ORDER BY created_at DESC
-                    """,
-                    (user_id, email.lower()),
-                )
-            else:
-                cur.execute(
-                    """
-                    SELECT id, user_id, email, type, content, created_at, metadata
-                    FROM recommendations
-                    WHERE user_id=?
-                    ORDER BY created_at DESC
-                    """,
-                    (user_id,),
-                )
-            rows = cur.fetchall()
-
-        result = []
-        for row in rows:
-            rec = dict(row)
-            if rec["metadata"]:
-                rec["metadata"] = json.loads(rec["metadata"])
-            result.append(rec)
-
-        return result
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Error fetching recommendation history: {str(e)}"
-        )
-
-
-@app.get("/reco/history", response_model=List[RecommendationOut])
-def get_all_recommendations(email: str = Query(...)):
-    try:
-        with get_conn() as c:
-            cur = c.cursor()
-            cur.execute(
-                """
-                SELECT id, user_id, email, type, content, created_at, metadata
-                FROM recommendations
-                WHERE email=?
-                ORDER BY created_at DESC
-                """,
-                (email.lower(),),
-            )
-            rows = cur.fetchall()
-
-        result = []
-        for row in rows:
-            rec = dict(row)
-            if rec["metadata"]:
-                rec["metadata"] = json.loads(rec["metadata"])
-            result.append(rec)
-
-        return result
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Error fetching recommendations: {str(e)}"
-        )
-
-
-@app.get("/reco/test", response_model=dict)
-def test_recommendations():
-    try:
-        with get_conn() as c:
-            cur = c.cursor()
-            cur.execute("SELECT COUNT(*) as count FROM recommendations")
-            count = cur.fetchone()["count"]
-
-            cur.execute(
-                """
-                SELECT id, user_id, email, type, content, created_at
-                FROM recommendations
-                ORDER BY created_at DESC
-                LIMIT 5
-                """
-            )
-            recent = [dict(r) for r in cur.fetchall()]
-
-        return {"total_recommendations": count, "recent": recent}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+# -------------------------------------------------------
+# Exécuter le service directement (mode local)
+# -------------------------------------------------------
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("app.main:app", host="0.0.0.0", port=RECO_PORT, reload=True)
