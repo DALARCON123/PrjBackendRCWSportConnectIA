@@ -9,7 +9,11 @@ from dotenv import load_dotenv
 import os
 import httpx
 
-from .mongodb_client import users_collection, recommendations_collection, health_metrics_collection  # MongoDB pour les métriques
+from .mongodb_client import (
+    users_collection,
+    recommendations_collection,
+    health_metrics_collection,  
+) # MongoDB pour les métriques
 
 # -------------------------------------------------------
 # Charger le fichier .env à la racine du projet
@@ -62,6 +66,65 @@ class RecoRequest(BaseModel):
     lang: Optional[str] = None
 
 # -------------------------------------------------------
+# Modèle d’entrée : demande de recommandation
+# -------------------------------------------------------
+class RecoRequest(BaseModel):
+    user_id: str
+    lang: Optional[str] = None
+
+# <<< NOVO: modèle + endpoint pour /reco/send-report >>>
+class SendReportRequest(BaseModel):
+    user_id: str
+    email: str
+    name: Optional[str] = None
+    lang: Optional[str] = "fr"
+
+
+@app.post("/reco/send-report")
+async def send_report(req: SendReportRequest):
+    """
+    Récupère la dernière recommandation de l'utilisateur dans MongoDB
+    et retourne un stub de réponse pour l'envoi de rapport.
+
+    (Ici tu peux plus tard brancher ton envoi réel d'e-mail.)
+    """
+    # 1) Chercher la dernière reco pour cet utilisateur
+    try:
+        last_reco = recommendations_collection.find_one(
+            {"user_id": req.user_id},
+            sort=[("createdAt", -1)]
+        )
+    except Exception as e:
+        print(f"[RECO] Erreur MongoDB send_report pour user {req.user_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Erreur serveur lors de la lecture des recommandations."
+        )
+
+    if not last_reco:
+        raise HTTPException(
+            status_code=404,
+            detail="Aucune recommandation trouvée pour cet utilisateur."
+        )
+
+    # Ici tu pourrais construire le contenu d'e-mail à partir de last_reco["answer"]
+    # et appeler une fonction send_email_smtp(req.email, sujet, contenu)
+
+    print(
+        f"[RECO] (stub) Rapport généré pour {req.email} "
+        f"avec reco_id={last_reco.get('_id')}"
+    )
+
+    return {
+        "ok": True,
+        "message": "Rapport généré (envoi e-mail à implémenter).",
+        "email": req.email,
+    }
+# <<< FIM DA PARTE NOVA >>>
+
+
+
+# -------------------------------------------------------
 # Route santé du service
 # -------------------------------------------------------
 @app.get("/reco/health")
@@ -92,13 +155,19 @@ def build_question_from_profile(profile: Dict[str, Any]) -> str:
         parts.append(f"- Objectif principal : {goal}")
 
     parts.append(
-        "\nSur ce profil, donne :\n"
-        "1) un plan d'entraînement simple (3 à 5 séances par semaine max),\n"
-        "2) quelques conseils d’alimentation et d’hydratation,\n"
-        "3) un conseil de récupération / sommeil / motivation.\n"
-        "Sois concret mais prudent : intensité progressive, échauffement, "
-        "étirements légers et recommandation de consulter un professionnel "
-        "de la santé en cas de douleur ou de condition médicale."
+        "\nSur ce profil, produis une réponse en **Markdown** avec "
+        "EXACTEMENT 4 sections, dans cet ordre, et rien d'autre :\n\n"
+        "1) **Plan**\n"
+        "* Résume en 1 à 2 phrases le type de programme adapté.\n\n"
+        "2) **Plan d'entraînement (3 séances par semaine max)**\n"
+        "* Donne un exemple de programme pour la semaine, sous forme de liste à puces.\n\n"
+        "3) **Conseils d'alimentation et d’hydratation**\n"
+        "* Liste quelques conseils pratiques (liste à puces).\n\n"
+        "4) **Conseil de récupération/sommeil/motivation**\n"
+        "* Donne quelques conseils de récupération, sommeil et motivation (liste à puces).\n\n"
+        "Chaque section doit commencer par son titre en gras (par ex. `**Plan**`) "
+        "sur une ligne seule, suivi d'une liste d'éléments commençant par `* `. "
+        "N’ajoute pas d’introduction, pas de conclusion, pas d’emojis en début de ligne."
     )
     return "\n".join(parts)
 
