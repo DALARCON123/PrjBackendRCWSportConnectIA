@@ -8,6 +8,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 import os
 import httpx
+import smtplib
+from email.mime.text import MIMEText
+from datetime import datetime 
 
 from .mongodb_client import (
     users_collection,
@@ -28,6 +31,32 @@ CHATBOT_URL = os.getenv(
 ).rstrip("/")
 
 print(f"[RECO] CHATBOT_URL = {CHATBOT_URL}")
+
+# ------------ SMTP POUR ENVOYER LES EMAILS ------------
+SMTP_HOST = os.getenv("SMTP_HOST")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER")
+SMTP_PASS = os.getenv("SMTP_PASS")
+FROM_EMAIL = os.getenv("FROM_EMAIL", SMTP_USER or "")
+
+
+def send_email_smtp(to_email: str, subject: str, html_body: str):
+    """
+    Envoie un e-mail HTML simple via SMTP (par ex. Gmail).
+    """
+    if not (SMTP_HOST and SMTP_USER and SMTP_PASS):
+        raise RuntimeError("Configuration SMTP incomplète (voir .env).")
+
+    msg = MIMEText(html_body, "html", "utf-8")
+    msg["Subject"] = subject
+    msg["From"] = FROM_EMAIL
+    msg["To"] = to_email
+
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+        server.starttls()
+        server.login(SMTP_USER, SMTP_PASS)
+        server.send_message(msg)
+
 
 # -------------------------------------------------------
 # Création de l’application FastAPI
@@ -72,6 +101,105 @@ class RecoRequest(BaseModel):
     user_id: str
     lang: Optional[str] = None
 
+# -------------------------------------------------------
+# Modèle d’entrée : demande de recommandation
+# -------------------------------------------------------
+class RecoRequest(BaseModel):
+    user_id: str
+    lang: Optional[str] = None
+
+
+
+# -------------------------------------------------------
+# Fonction pour filtrer le plan d'entraînement selon le jour
+# -------------------------------------------------------
+def filter_reco_for_today(answer: str, lang: str) -> str:
+    """
+    Filtre uniquement les lignes de jour de la semaine dans la section
+    'Plan d'entraînement / Plan de entrenamiento / Training plan'
+    pour garder seulement la séance du jour dans l'e-mail.
+
+    Les autres sections (Plan, alimentation, récupération) restent inchangées.
+    """
+    if not answer:
+        return answer
+
+    # 0 = lundi, 6 = dimanche
+    today_idx = datetime.now().weekday()
+    lang = (lang or "").lower()
+
+    # Préfixes des bullets à garder pour chaque langue
+    if lang.startswith("fr"):
+        day_prefixes = {
+            0: ["* Lundi"],        # lundi
+            2: ["* Mercredi"],     # mercredi
+            4: ["* Vendredi"],     # vendredi
+            5: ["* Option"],       # samedi → option week-end
+            6: ["* Option"],       # dimanche → option week-end
+        }
+        training_headers = ["**Plan d'entraînement", "**Plan d’entrainement", "**Plan d entrainement"]
+    elif lang.startswith("es"):
+        day_prefixes = {
+            0: ["* Lunes"],        # lunes
+            2: ["* Miércoles", "* Miercoles"],  # miércoles
+            4: ["* Viernes"],      # viernes
+            5: ["* Opcional"],     # sábado
+            6: ["* Opcional"],     # domingo
+        }
+        training_headers = ["**Plan de entrenamiento"]
+    else:
+        # anglais (fallback)
+        day_prefixes = {
+            0: ["* Monday"],
+            2: ["* Wednesday"],
+            4: ["* Friday"],
+            5: ["* Optional"],
+            6: ["* Optional"],
+        }
+        training_headers = ["**Training plan"]
+
+    prefixes_today = day_prefixes.get(today_idx)
+    # Si on n'a pas de règle pour ce jour (ex. mardi/jeudi), on ne filtre pas
+    if not prefixes_today:
+        return answer
+
+    lines = answer.splitlines()
+    result: list[str] = []
+
+    in_training_section = False
+
+    for line in lines:
+        stripped = line.strip()
+
+        # Détection d'un titre de section Markdown : **...**
+        if stripped.startswith("**") and stripped.endswith("**"):
+            # Sommes-nous dans la section de plan d'entraînement ?
+            if any(stripped.startswith(h) for h in training_headers):
+                in_training_section = True
+            else:
+                # Autre section → on sort de la section entraînement
+                in_training_section = False
+
+            result.append(line)
+            continue
+
+        if in_training_section:
+            # Dans la section entraînement :
+            if stripped.startswith("*"):
+                # Bullet avec jour de la semaine → garde seulement celui d'aujourd'hui
+                keep = any(stripped.startswith(p) for p in prefixes_today)
+                if keep:
+                    result.append(line)
+            else:
+                # Texte normal dans la section entraînement → on garde
+                result.append(line)
+        else:
+            # En dehors de la section entraînement → on garde tout
+            result.append(line)
+
+    return "\n".join(result)
+
+
 # <<< NOVO: modèle + endpoint pour /reco/send-report >>>
 class SendReportRequest(BaseModel):
     user_id: str
@@ -83,10 +211,9 @@ class SendReportRequest(BaseModel):
 @app.post("/reco/send-report")
 async def send_report(req: SendReportRequest):
     """
-    Récupère la dernière recommandation de l'utilisateur dans MongoDB
-    et retourne un stub de réponse pour l'envoi de rapport.
-
-    (Ici tu peux plus tard brancher ton envoi réel d'e-mail.)
+    Récupère la dernière recommandation de l'utilisateur dans MongoDB,
+    filtre le plan d'entraînement pour ne garder que la séance du jour,
+    et ENVOIE réellement un e-mail au client.
     """
     # 1) Chercher la dernière reco pour cet utilisateur
     try:
@@ -107,21 +234,105 @@ async def send_report(req: SendReportRequest):
             detail="Aucune recommandation trouvée pour cet utilisateur."
         )
 
-    # Ici tu pourrais construire le contenu d'e-mail à partir de last_reco["answer"]
-    # et appeler une fonction send_email_smtp(req.email, sujet, contenu)
+    # 2) Récupérer la réponse IA brute
+    answer = last_reco.get("answer", "") or ""
+    lang = (req.lang or "fr").lower()
 
-    print(
-        f"[RECO] (stub) Rapport généré pour {req.email} "
-        f"avec reco_id={last_reco.get('_id')}"
-    )
+    # 3) Filtrer la partie plan d'entraînement pour ne garder que le jour actuel
+    filtered_answer = filter_reco_for_today(answer, lang)
 
+        # 4) Construire le contenu de l'e-mail
+    subject = "Ton résumé personnalisé SportConnectIA"
+
+    html_body = f"""\
+<!DOCTYPE html>
+<html lang="{lang}">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Plan SportConnectIA</title>
+  </head>
+  <body style="margin:0;padding:0;background-color:#0f172a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#0f172a;padding:24px 0;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 10px 30px rgba(15,23,42,0.25);">
+            <!-- Header -->
+            <tr>
+              <td style="padding:24px 32px 16px;background:linear-gradient(135deg,#a855f7,#3b82f6);color:#f9fafb;">
+                <h1 style="margin:0;font-size:24px;font-weight:800;">SportConnectIA</h1>
+                <p style="margin:8px 0 0;font-size:14px;opacity:0.9;">
+                  Ton plan personnalisé du jour
+                </p>
+              </td>
+            </tr>
+
+            <!-- Contenu principal -->
+            <tr>
+              <td style="padding:24px 32px 8px;color:#0f172a;font-size:14px;line-height:1.6;">
+                <p style="margin:0 0 12px;">Bonjour {req.name or ''},</p>
+                <p style="margin:0 0 16px;">
+                  Voici le dernier résumé généré pour toi
+                  <strong>(avec la séance du jour)</strong> :
+                </p>
+
+                <div style="margin:16px 0;padding:16px 18px;border-radius:12px;background:#f9fafb;border:1px solid #e5e7eb;">
+                  <pre style="
+                    margin:0;
+                    font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+                    font-size:13px;
+                    white-space:pre-wrap;
+                    color:#111827;
+                  ">{filtered_answer}</pre>
+                </div>
+
+                <p style="margin:16px 0 0;font-size:12px;color:#6b7280;">
+                  Ces recommandations sont indicatives et ne remplacent pas l’avis d’un professionnel de la santé.
+                  Adapte toujours l’intensité à ton niveau et à ton ressenti.
+                </p>
+
+                <p style="margin:24px 0 0;">
+                  À bientôt !<br/>
+                  <span style="font-weight:600;">L’équipe SportConnectIA</span>
+                </p>
+              </td>
+            </tr>
+
+            <!-- Footer léger -->
+            <tr>
+              <td style="padding:12px 32px 20px;background:#f3f4f6;color:#9ca3af;font-size:11px;text-align:center;">
+                Tu reçois cet e-mail parce que tu as généré un plan sur SportConnectIA.
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>
+"""
+
+
+    # 5) Envoyer l'e-mail via SMTP
+    try:
+        send_email_smtp(req.email, subject, html_body)
+        print(
+            f"[RECO] Rapport envoyé par e-mail à {req.email} "
+            f"(reco_id={last_reco.get('_id')})"
+        )
+    except Exception as e:
+        print(f"[RECO] Erreur lors de l'envoi de l'e-mail: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Erreur lors de l'envoi de l'e-mail."
+        )
+
+    # 6) Réponse au frontend
     return {
         "ok": True,
-        "message": "Rapport généré (envoi e-mail à implémenter).",
+        "message": "Rapport envoyé par e-mail.",
         "email": req.email,
     }
 # <<< FIM DA PARTE NOVA >>>
-
 
 
 # -------------------------------------------------------
@@ -200,14 +411,13 @@ async def call_chatbot(message: str, lang: str) -> str:
 @app.post("/reco/generate")
 async def generate_recommendation(req: RecoRequest):
     """
-    1) Lit (ou crée) un profil utilisateur dans Firestore
+    1) Lit (ou crée) un profil utilisateur dans MongoDB
     2) Construit une question détaillée pour le Coach IA
     3) Appelle le microservice chatbot
     4) Sauvegarde la recommandation dans Firestore (si possible)
     5) Retourne { answer, profile } au frontend
     """
-
-    # -------- Profil par défaut (mêmes valeurs que dans le frontend) --------
+   # -------- Profil par défaut --------
     default_profile: Dict[str, Any] = {
         "name": "SportConnectIA",
         "age": 39,
@@ -218,15 +428,12 @@ async def generate_recommendation(req: RecoRequest):
     }
 
     profile: Dict[str, Any] = default_profile.copy()
-    firestore_ok = True
-    user_ref = None
 
     # -------- 1) Lire ou créer le profil dans MongoDB --------
     try:
         user_doc = users_collection.find_one({"_id": req.user_id})
 
         if user_doc:
-            # on fusionne les données MongoDB avec les valeurs par défaut
             profile.update({
                 "name": user_doc.get("name") or profile["name"],
                 "age": user_doc.get("age", profile["age"]),
@@ -236,7 +443,6 @@ async def generate_recommendation(req: RecoRequest):
                 "lang": user_doc.get("lang") or profile["lang"],
             })
         else:
-            # si l'utilisateur n'existe pas, on le crée avec le profil par défaut
             print(f"[RECO] Utilisateur {req.user_id} absent → création profil par défaut.")
             users_collection.insert_one({
                 "_id": req.user_id,
@@ -244,9 +450,8 @@ async def generate_recommendation(req: RecoRequest):
             })
 
     except Exception as e:
-        # Si MongoDB est down ou mal configuré, on continue quand même
+        # On log mais on continue avec le profil par défaut
         print(f"[RECO] Erreur MongoDB (lecture/écriture profil) : {e}")
-        firestore_ok = False
 
     # langue finale (priorité : requête -> profil -> fr)
     lang = (req.lang or profile.get("lang") or "fr").lower()
@@ -258,33 +463,31 @@ async def generate_recommendation(req: RecoRequest):
     # -------- 3) Appeler le microservice chatbot --------
     answer = await call_chatbot(question, lang)
     if not answer:
-        # Ici on renvoie une erreur 500 au frontend
-        # (le frontend affiche ton message rouge)
         raise HTTPException(
             status_code=500,
             detail="Erreur lors de la réponse IA depuis le chatbot."
         )
 
-    # -------- 4) Sauvegarder l'historique dans MongoDB (si possible) --------
-    if firestore_ok and user_ref is not None:
-        try:
-            from datetime import datetime
-            reco_data = {
-                "user_id": req.user_id,
-                "question": question,
-                "answer": answer,
-                "createdAt": datetime.utcnow(),
-                "age": profile.get("age"),
-                "weightKg": profile.get("weightKg"),
-                "heightCm": profile.get("heightCm"),
-                "mainGoal": profile.get("mainGoal"),
-                "lang": lang,
-            }
-            recommendations_collection.insert_one(reco_data)
-            print(f"[RECO] Recommandation enregistrée pour user {req.user_id}.")
-        except Exception as e:
-            # On log l'erreur, mais on n'empêche pas la réponse au frontend
-            print(f"[RECO] Erreur MongoDB en sauvegardant l'historique: {e}")
+    # -------- 4) Sauvegarder l'historique dans MongoDB --------
+    from datetime import datetime as _dt
+
+    try:
+        reco_data = {
+            "user_id": req.user_id,
+            "question": question,
+            "answer": answer,
+            "createdAt": _dt.utcnow(),
+            "age": profile.get("age"),
+            "weightKg": profile.get("weightKg"),
+            "heightCm": profile.get("heightCm"),
+            "mainGoal": profile.get("mainGoal"),
+            "lang": lang,
+        }
+        recommendations_collection.insert_one(reco_data)
+        print(f"[RECO] Recommandation enregistrée pour user {req.user_id}.")
+    except Exception as e:
+        # On log l'erreur, mais on renvoie quand même la réponse au frontend
+        print(f"[RECO] Erreur MongoDB en sauvegardant l'historique: {e}")
 
     # -------- 5) Retourner la recommandation + le profil --------
     return {"answer": answer, "profile": profile}

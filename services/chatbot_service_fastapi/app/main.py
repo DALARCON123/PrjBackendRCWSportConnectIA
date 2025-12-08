@@ -13,6 +13,8 @@ from pydantic import BaseModel
 import httpx
 from dotenv import load_dotenv
 
+
+
 # -------------------------------------------------------
 # Charger le fichier .env à la racine du projet
 # -------------------------------------------------------
@@ -72,6 +74,7 @@ class AskRequest(BaseModel):
     message: str
     lang: Optional[str] = "es"
     profile: Optional[dict] = None
+    history: Optional[list] = None
 
 
 # -------------------------------------------------------
@@ -108,6 +111,8 @@ SYSTEM_PROMPT = (
     "(política, programación, chismes, etc.), rechaza amablemente en una o dos "
     "frases e invita a formular una pregunta sobre deporte, salud, yoga o nutrición.\n"
     "Responde SIEMPRE en el idioma del usuario."
+    "Si el usuario responde a una de tus preguntas, usa su respuesta para adaptar tus consejos "
+    "y NO repitas la misma pregunta. Avanza paso a paso y mantén una conversación coherente.\n"
 )
 
 
@@ -115,13 +120,34 @@ SYSTEM_PROMPT = (
 # Palabras clave permitidas para filtrar preguntas (AMPLIADO)
 # -------------------------------------------------------
 ALLOWED_KEYWORDS = [
+    #português – saúde / nutrição / bem-estar
+    "saúde", "bem-estar", "alimentação", "nutrição", "dieta",
+    "comida saudável", "calorias", "proteínas", "carboidratos", "gorduras",
+    "hidratação", "suplementos", "vitaminas", "minerais",
+    "sono", "dormir", "descanso", "estresse", "ansiedade", "fadiga",
+    "dor muscular", "saúde mental", "hábitos saudáveis", "estilo de vida",
+    "bem-estar mental", "gestão do estresse", "relaxamento",
+    #português – treino / esportes
+    "exercício", "treino", "rotina", "plano de treino",
+    "esporte", "esportes", "cardio", "resistência", "força", "musculação",
+    "caminhar", "corrida", "maratona","natação", "ciclismo", "academia",
+    "pesos", "levantamento de peso", "futebol", "basquete", "vôlei", "tênis",
+    "flexibilidade", "mobilidade", "alongamento", "lesão", "dor muscular",
+    "yoga", "pilates", "respiração", "meditação", "mindfulness",    
+    "dança", "relaxamento", "meditação guiada","gestão do estresse", "depressao",
+    "ansiedade","saúde mental","depressão", "exercícios de respiração", "exercícios para ansiedade",
+    "exercicios pesados",
     # Español – salud / nutrición / bienestar
     "salud", "bienestar", "alimentación", "alimentacion", "nutrición", "nutricion",
     "dieta", "comida sana", "comida saludable", "calorías", "calorias",
     "proteína", "proteina", "proteínas", "proteinas",
     "carbohidratos", "grasas saludables", "hidratar", "hidratación", "suplemento",
     "suplementos", "vitaminas", "minerales",
-    "sueño", "dormir", "descanso", "estrés", "estres", "ansiedad",
+    "sueño", "dormir", "descanso", "estrés", "estres", "ansiedad", "fatiga",
+    "dolor muscular", "salud mental", "hábitos saludables", "habitos saludables",
+    "estilo de vida", "bienestar mental", "gestion del estrés", "gestion del estres",
+    "relajación", "relajacion","manejo del estrés","manejo del estres","salud emocional",
+    "salud fisica","salud física",
     # Español – entrenamiento / deportes
     "ejercicio", "entrenamiento", "rutina", "programa de entrenamiento",
     "deporte", "deportes", "cardio", "resistencia", "fuerza", "músculo",
@@ -133,29 +159,41 @@ ALLOWED_KEYWORDS = [
     "flexibilidad", "movilidad", "estiramiento", "estiramientos", "stretching",
     "lesión", "lesiones", "dolor muscular", "agujetas",
     "yoga", "pilates", "respiración", "respiracion", "mindfulness",
-    "meditación", "meditacion",
+    "meditación", "meditacion", "dance", "danza", "relajación", "relajacion",
+    "meditación guiada","meditacion guiada","manejo del estrés","manejo del estres",
+    "recuperación","recuperacion","salud fisica","salud física",
 
     # Français – santé / nutrition / bien-être
     "santé", "bien-être", "alimentation", "nutrition", "régime",
     "alimentation saine", "calories", "protéines", "glucides", "lipides",
     "hydratation", "suppléments", "vitamines", "minéraux",
-    "sommeil", "dormir", "repos", "stress", "anxiété",
+    "sommeil", "dormir", "repos", "stress", "anxiété", "fatigue",
+    "douleur", "anxiété", "gestion du stress",
+    "récupération", "recuperation", "relaxation", "repos", "bien-être mental",
+    "santé mentale", "habitudes de vie","mode de vie sain", "habitudes saines",
+    "gestion du stress", "relaxation","pleine conscience","mindfulness","méditation guidée",
+    "santé physique","santé mentale","dépression","anxiété","exercices de respiration"
     # Français – sport / entraînement
     "exercice", "entraînement", "entrainement", "routine", "programme d'entraînement",
     "sport", "sports", "cardio", "endurance", "force", "musculation",
     "course", "footing", "running", "marathon",
-    "natation", "vélo", "cyclisme", "vélo elliptique",
+    "natation", "vélo", "cyclisme", "vélo elliptique","danse",
     "gym", "salle de sport", "haltères", "poids",
     "football", "basket", "basketball", "volley", "tennis",
     "souplesse", "mobilité", "étirements", "stretching",
     "blessure", "douleur musculaire",
-    "yoga", "pilates", "respiration", "méditation",
+    "yoga", "pilates", "respiration", "méditation", "pleine conscience",
+    "relaxation","méditation guidée","mindfulness", "gestion du stress","gestion du stress",
+    "récupération","recuperation","santé physique","santé mentale","exercices pour l'anxiété",
+    "exercices intenses","exercices lourds","dépression"
 
     # English – health / nutrition / wellness
     "health", "wellbeing", "well-being", "healthy", "nutrition", "diet",
     "calories", "protein", "proteins", "carbs", "fats", "hydration",
     "supplement", "supplements", "vitamins", "minerals",
-    "sleep", "rest", "recovery", "stress", "anxiety",
+    "sleep", "rest", "recovery", "stress", "anxiety"," fatigue",
+    "muscle pain", "mental health", "lifestyle", "healthy habits",
+    "mental wellbeing", "mental well-being","stress", "relaxation",
     # English – training / sports
     "exercise", "workout", "training", "training plan", "routine",
     "sport", "sports", "cardio", "endurance", "strength", "muscle", "muscles",
@@ -166,6 +204,7 @@ ALLOWED_KEYWORDS = [
     "flexibility", "mobility", "stretch", "stretching",
     "injury", "injuries", "muscle pain", "soreness",
     "yoga", "pilates", "breathing", "mindfulness", "meditation",
+    "dance", "relaxation", "guided meditation"," mindfulness", "stress management",
 ]
 
 
@@ -194,33 +233,89 @@ def is_allowed_question(text: str) -> bool:
 
 # -------------------------------------------------------
 # Respuesta básica si HuggingFace falla o no hay token
+#  👉 AQUI estávamos devolviendo “Dis-moi ton objectif…”
+#  Agora devolvemos un plan completo en 4 secciones (Markdown)
 # -------------------------------------------------------
 def fallback_answer(msg: str, lang: str) -> str:
     m = (msg or "").lower()
 
-    # pequeño mensaje más “coach”
     if lang.startswith("fr"):
         return (
-            "Dis-moi ton objectif (santé, perte de poids, prise de muscle, "
-            "énergie, stress) et ton niveau actuel, et je te propose une "
-            "routine simple (sport, yoga ou mobilité) 😊"
+            "**Plan**\n"
+            "* Salut ! À partir de ton profil et de ton objectif de remise en forme, je te propose un programme d'entraînement simple, progressif et adaptable à ton niveau.\n"
+            "* L’idée est de bouger régulièrement, de renforcer tout le corps et d’adopter quelques bonnes habitudes d’alimentation et de récupération.\n\n"
+            "**Plan d'entraînement (3 séances par semaine max)**\n"
+            "* Lundi : 30–40 minutes de marche rapide ou de vélo léger, suivies de 5–10 minutes d’étirements doux (jambes, dos, épaules).\n"
+            "* Mercredi : 30 minutes de renforcement musculaire (squats au poids du corps, fentes, pompes adaptées contre un mur ou sur les genoux, gainage 3×20–30 s).\n"
+            "* Vendredi : 30–40 minutes d’activité cardio au choix (marche en côte, vélo, natation douce ou cours de yoga dynamique), puis respiration profonde et étirements.\n"
+            "* Option : si tu te sens bien, ajoute une courte séance de mobilité le weekend (10–15 minutes d’étirements et de mouvements articulaires).\n\n"
+            "**Conseils d'alimentation et d’hydratation**\n"
+            "* Bois de l’eau régulièrement dans la journée (6 à 8 verres), et un peu avant/après l’entraînement.\n"
+            "* Compose tes repas autour de trois piliers : une source de protéines (œufs, poisson, tofu, légumineuses), des légumes variés et un féculent complet (riz complet, quinoa, patate douce, pain complet).\n"
+            "* Limite les produits ultra-transformés, très sucrés ou très gras (boissons gazeuses, fast-food, snacks industriels) à un usage occasionnel.\n"
+            "* Privilégie des collations simples : fruit frais, yaourt nature, poignée de noix ou d’amandes.\n"
+            "* Essaie de garder des horaires de repas assez réguliers pour stabiliser ton énergie dans la journée.\n\n"
+            "**Conseil de récupération/sommeil/motivation**\n"
+            "* Vise 7 à 8 heures de sommeil par nuit, dans une chambre calme, sombre et fraîche (éloigne les écrans au moins 30 minutes avant de dormir).\n"
+            "* Après chaque séance, prends 5–10 minutes pour respirer profondément et t’étirer : cela aide à détendre les muscles et le mental.\n"
+            "* Écoute ton corps : en cas de douleur inhabituelle, diminue l’intensité ou remplace l’exercice par un mouvement plus doux.\n"
+            "* Fixe-toi de petits objectifs concrets (par exemple : marcher 3 fois par semaine pendant un mois) et note tes progrès.\n"
+            "* N’hésite pas à demander l’avis d’un professionnel de santé si tu as un problème médical ou une douleur persistante.\n"
         )
+
     if lang.startswith("es"):
         return (
-            "Cuéntame tu objetivo (salud, peso, músculo, energía o estrés) "
-            "y tu nivel actual, y te propongo una rutina sencilla de deporte, "
-            "cardio o yoga 😊"
+            "**Plan**\n"
+            "* A partir de tu objetivo de ponerte en forma, te propongo una rutina sencilla, progresiva y realista que puedas mantener en el tiempo.\n"
+            "* La idea es moverte de forma regular, trabajar fuerza básica y cuidar la alimentación y el descanso.\n\n"
+            "**Plan de entrenamiento (3 sesiones por semana máximo)**\n"
+            "* Lunes: 30–40 minutos de caminata rápida o bicicleta suave, seguidos de 5–10 minutos de estiramientos.\n"
+            "* Miércoles: 30 minutos de fuerza con el propio peso (sentadillas, zancadas, flexiones apoyadas en pared o rodillas, plancha 3×20–30 s).\n"
+            "* Viernes: 30–40 minutos de cardio a tu elección (caminata en subida, bici, natación suave o yoga dinámico) + respiración profunda.\n"
+            "* Opcional: el fin de semana, 10–15 minutos de movilidad y estiramientos suaves para relajar el cuerpo.\n\n"
+            "**Consejos de alimentación e hidratación**\n"
+            "* Bebe agua a lo largo del día (6–8 vasos) y alrededor del entrenamiento.\n"
+            "* Llena tu plato con: una fuente de proteína (huevos, pescado, legumbres, tofu), verduras de colores y un carbohidrato integral (arroz integral, quinoa, avena, pan integral).\n"
+            "* Reduce los ultraprocesados, refrescos azucarados y “fast-food” a ocasiones puntuales.\n"
+            "* Elige colaciones simples: fruta fresca, yogur natural, un puñado de frutos secos.\n"
+            "* Intenta mantener horarios de comida relativamente regulares para estabilizar tu energía.\n\n"
+            "**Consejos de recuperación/sueño/motivación**\n"
+            "* Intenta dormir 7–8 horas por noche en un ambiente oscuro y tranquilo, alejando pantallas antes de acostarte.\n"
+            "* Después de entrenar, dedica unos minutos a estirarte y respirar profundo para soltar tensión.\n"
+            "* Escucha tu cuerpo: si notas dolor raro, baja la intensidad o cambia el ejercicio por una variante más suave.\n"
+            "* Márcate objetivos pequeños y medibles (por ejemplo, caminar 3 veces por semana) y celebra tus avances.\n"
+            "* Si tienes una condición médica o un dolor persistente, consulta con un profesional de la salud.\n"
         )
+
+    # Inglés (fallback general)
     return (
-        "Tell me your goal (health, weight, muscle, energy or stress) and your "
-        "current level, and I’ll propose a simple workout or yoga routine 😊"
+        "**Plan**\n"
+        "* Based on your goal of getting fitter, here is a simple, progressive routine you can follow safely.\n"
+        "* The idea is to move regularly, build basic strength and support it with good nutrition and recovery habits.\n\n"
+        "**Training plan (3 sessions per week max)**\n"
+        "* Monday: 30–40 minutes of brisk walking or easy cycling, followed by 5–10 minutes of light stretching.\n"
+        "* Wednesday: 30 minutes of body-weight strength (squats, lunges, push-ups against a wall or on knees, plank 3×20–30 s).\n"
+        "* Friday: 30–40 minutes of cardio of your choice (incline walk, bike, easy swimming or a dynamic yoga session) + deep breathing.\n"
+        "* Optional: on the weekend, 10–15 minutes of mobility and gentle stretching to relax your body.\n\n"
+        "**Nutrition and hydration tips**\n"
+        "* Drink water regularly throughout the day (around 6–8 glasses) and around your workouts.\n"
+        "* Build your meals around: a source of protein (eggs, fish, legumes, tofu), plenty of vegetables and a complex carb (brown rice, quinoa, oats, whole-grain bread).\n"
+        "* Limit highly processed foods, sugary drinks and fast-food to occasional treats.\n"
+        "* Choose simple snacks: fresh fruit, plain yogurt, a handful of nuts.\n"
+        "* Try to keep fairly regular meal times to stabilise your energy.\n\n"
+        "**Recovery / sleep / motivation tips**\n"
+        "* Aim for 7–8 hours of sleep per night in a dark, quiet room, and avoid screens just before bed.\n"
+        "* After each session, take a few minutes to stretch and breathe deeply to let your muscles and mind relax.\n"
+        "* Listen to your body: if you feel unusual pain, reduce intensity or swap the exercise for a gentler option.\n"
+        "* Set small, realistic goals (for example: walk 3 times per week for a month) and track your progress.\n"
+        "* If you have a medical condition or persistent pain, ask advice from a health professional.\n"
     )
 
 
 # -------------------------------------------------------
 # Llamada al modelo IA en HuggingFace Router
 # -------------------------------------------------------
-async def call_huggingface(question: str, lang: str) -> str:
+async def call_huggingface(question: str, lang: str, history: Optional[list] = None) -> str:
     if not HF_API_TOKEN:
         return ""
 
@@ -229,15 +324,30 @@ async def call_huggingface(question: str, lang: str) -> str:
         "Content-Type": "application/json",
     }
 
+    # ---- Construir a conversa completa ----
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT}
+    ]
+
+    # Histórico vindo do frontend: [{ id, role, text }, ...]
+    if history:
+        # pegamos só as últimas 8 mensagens para não explodir tokens
+        for item in history[-8:]:
+            role = "assistant" if (item.get("role") == "assistant") else "user"
+            text = (item.get("text") or "").strip()
+            if not text:
+                continue
+            messages.append({"role": role, "content": text})
+
+    # Mensagem atual do usuário (última pergunta)
+    messages.append({
+        "role": "user",
+        "content": f"Langue de l'utilisateur: {lang}\nDernier message: {question}"
+    })
+
     payload = {
         "model": HF_MODEL,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": f"Idioma / Lang / Langue du usuario: {lang}\n\nPregunta / Question: {question}",
-            },
-        ],
+        "messages": messages,
         "max_tokens": MAX_RESPONSE_TOKENS,
         "temperature": TEMPERATURE,
         "top_p": TOP_P,
@@ -299,8 +409,8 @@ async def ask(req: AskRequest):
             )
         }
 
-    # --- Llamar al modelo HF ---
-    answer = await call_huggingface(msg, lang)
+   # --- Llamar al modelo HF (con historial) ---
+    answer = await call_huggingface(msg, lang, req.history)
 
     # --- Si falla → fallback local ---
     if not answer:

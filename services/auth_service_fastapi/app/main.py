@@ -158,7 +158,7 @@ def register(body: RegisterDto, db=Depends(get_db)):
     # Vérifier si l'utilisateur existe déjà
     existing = db.query(User).filter(User.email == email).first()
     if existing:
-        raise HTTPException(status_code=409, detail="user already exists")
+        raise HTTPException(status_code=409, detail="L'utilisateur existe déjà")
 
     # Créer un nouvel utilisateur
     new_user = User(
