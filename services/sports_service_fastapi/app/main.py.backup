@@ -1,0 +1,173 @@
+﻿from fastapi import FastAPI, Query
+from fastapi.middleware.cors import CORSMiddleware
+import requests
+
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Base de datos de videos verificados y activos
+VIDEOS_FALLBACK = {
+    "Yoga": [
+        {"title": "Yoga pour débutants - 15 minutes", "videoId": "Yzm3fA2HhkQ", "image": "https://i.ytimg.com/vi/Yzm3fA2HhkQ/mqdefault.jpg"},
+        {"title": "Yoga matinal énergisant", "videoId": "4C-gxOE0j7s", "image": "https://i.ytimg.com/vi/4C-gxOE0j7s/mqdefault.jpg"},
+        {"title": "Yoga relaxation soir", "videoId": "Ji5y90va_X8", "image": "https://i.ytimg.com/vi/Ji5y90va_X8/mqdefault.jpg"},
+        {"title": "Yoga débutant complet 20min", "videoId": "X655B4ISakg", "image": "https://i.ytimg.com/vi/X655B4ISakg/mqdefault.jpg"},
+        {"title": "Yoga étirements complets", "videoId": "O0IeKWPHYTg", "image": "https://i.ytimg.com/vi/O0IeKWPHYTg/mqdefault.jpg"},
+        {"title": "Yoga flow doux", "videoId": "j7rKKpwdXNE", "image": "https://i.ytimg.com/vi/j7rKKpwdXNE/mqdefault.jpg"},
+    ],
+    "Cardio": [
+        {"title": "Cardio Training 30 Minutes", "videoId": "6buOGGOwmXI", "image": "https://i.ytimg.com/vi/6buOGGOwmXI/mqdefault.jpg"},
+        {"title": "Cardio intensif sans équipement", "videoId": "hbV16grOT5Y", "image": "https://i.ytimg.com/vi/hbV16grOT5Y/mqdefault.jpg"},
+        {"title": "Cardio débutant 20 minutes", "videoId": "8CtBqczAjbs", "image": "https://i.ytimg.com/vi/8CtBqczAjbs/mqdefault.jpg"},
+        {"title": "Cardio brûle graisse efficace", "videoId": "YBnSUIVXfXk", "image": "https://i.ytimg.com/vi/YBnSUIVXfXk/mqdefault.jpg"},
+        {"title": "Cardio maison complet", "videoId": "kVmNJ7UZkFk", "image": "https://i.ytimg.com/vi/kVmNJ7UZkFk/mqdefault.jpg"},
+        {"title": "Cardio fitness rapide", "videoId": "gOqJ7V1X2RI", "image": "https://i.ytimg.com/vi/gOqJ7V1X2RI/mqdefault.jpg"},
+    ],
+    "HIIT": [
+        {"title": "HIIT Workout 20 Minutes", "videoId": "M0uO8X3_tEA", "image": "https://i.ytimg.com/vi/M0uO8X3_tEA/mqdefault.jpg"},
+        {"title": "HIIT débutant sans matériel", "videoId": "aUb0q7MYh5o", "image": "https://i.ytimg.com/vi/aUb0q7MYh5o/mqdefault.jpg"},
+        {"title": "HIIT intense full body", "videoId": "RBMmgRUudJk", "image": "https://i.ytimg.com/vi/RBMmgRUudJk/mqdefault.jpg"},
+        {"title": "HIIT cardio brûle calories", "videoId": "ml6cT4AZdqI", "image": "https://i.ytimg.com/vi/ml6cT4AZdqI/mqdefault.jpg"},
+        {"title": "HIIT 15 minutes efficace", "videoId": "cZnsLVArIt8", "image": "https://i.ytimg.com/vi/cZnsLVArIt8/mqdefault.jpg"},
+        {"title": "HIIT workout maison", "videoId": "q1g_gLrj2E0", "image": "https://i.ytimg.com/vi/q1g_gLrj2E0/mqdefault.jpg"},
+    ],
+    "Musculation": [
+        {"title": "Musculation Full Body 30min", "videoId": "R27HBJEwR_w", "image": "https://i.ytimg.com/vi/R27HBJEwR_w/mqdefault.jpg"},
+        {"title": "Renforcement musculaire complet", "videoId": "YYOnTr4ASTY", "image": "https://i.ytimg.com/vi/YYOnTr4ASTY/mqdefault.jpg"},
+        {"title": "Musculation sans matériel", "videoId": "TvOhJgVAmWc", "image": "https://i.ytimg.com/vi/TvOhJgVAmWc/mqdefault.jpg"},
+        {"title": "Musculation haut du corps", "videoId": "IODxDxX7oi4", "image": "https://i.ytimg.com/vi/IODxDxX7oi4/mqdefault.jpg"},
+        {"title": "Musculation jambes fessiers", "videoId": "lCg_gh98PhQ", "image": "https://i.ytimg.com/vi/lCg_gh98PhQ/mqdefault.jpg"},
+        {"title": "Musculation abdos gainage", "videoId": "DHD1-2P94DI", "image": "https://i.ytimg.com/vi/DHD1-2P94DI/mqdefault.jpg"},
+    ],
+    "Étirements": [
+        {"title": "Étirements complets tout le corps", "videoId": "qULTwquOuT4", "image": "https://i.ytimg.com/vi/qULTwquOuT4/mqdefault.jpg"},
+        {"title": "Stretching flexibilité 15min", "videoId": "g_tea8ZNk5A", "image": "https://i.ytimg.com/vi/g_tea8ZNk5A/mqdefault.jpg"},
+        {"title": "Étirements dos et jambes", "videoId": "4pKly2JojMw", "image": "https://i.ytimg.com/vi/4pKly2JojMw/mqdefault.jpg"},
+        {"title": "Stretching matinal doux", "videoId": "Ji5y90va_X8", "image": "https://i.ytimg.com/vi/Ji5y90va_X8/mqdefault.jpg"},
+        {"title": "Étirements souplesse", "videoId": "L_xrDAtykMI", "image": "https://i.ytimg.com/vi/L_xrDAtykMI/mqdefault.jpg"},
+        {"title": "Stretching relaxation", "videoId": "X655B4ISakg", "image": "https://i.ytimg.com/vi/X655B4ISakg/mqdefault.jpg"},
+    ],
+    "Pilates": [
+        {"title": "Pilates débutant 20 minutes", "videoId": "0EFZ5hTHxw4", "image": "https://i.ytimg.com/vi/0EFZ5hTHxw4/mqdefault.jpg"},
+        {"title": "Pilates abdominaux gainage", "videoId": "Bw4M0aGplLQ", "image": "https://i.ytimg.com/vi/Bw4M0aGplLQ/mqdefault.jpg"},
+        {"title": "Pilates complet maison", "videoId": "nks00R7oQq0", "image": "https://i.ytimg.com/vi/nks00R7oQq0/mqdefault.jpg"},
+        {"title": "Pilates mat flow", "videoId": "4wkTgDUSMPM", "image": "https://i.ytimg.com/vi/4wkTgDUSMPM/mqdefault.jpg"},
+        {"title": "Pilates tonification corps", "videoId": "FmF3xlCF7kw", "image": "https://i.ytimg.com/vi/FmF3xlCF7kw/mqdefault.jpg"},
+        {"title": "Pilates débutant facile", "videoId": "K56Z12XsB8s", "image": "https://i.ytimg.com/vi/K56Z12XsB8s/mqdefault.jpg"},
+    ],
+    "Danse Fitness": [
+        {"title": "Zumba Fitness Party", "videoId": "VY1eFxgRR-k", "image": "https://i.ytimg.com/vi/VY1eFxgRR-k/mqdefault.jpg"},
+        {"title": "Danse Fitness Cardio Fun", "videoId": "O-mr11DEoZI", "image": "https://i.ytimg.com/vi/O-mr11DEoZI/mqdefault.jpg"},
+        {"title": "Zumba débutant 30 minutes", "videoId": "wWn4_LMurqQ", "image": "https://i.ytimg.com/vi/wWn4_LMurqQ/mqdefault.jpg"},
+        {"title": "Cardio Dance Workout", "videoId": "t1JghzZCWYw", "image": "https://i.ytimg.com/vi/t1JghzZCWYw/mqdefault.jpg"},
+        {"title": "Danse fitness brûle graisse", "videoId": "KXj_bxcvUk4", "image": "https://i.ytimg.com/vi/KXj_bxcvUk4/mqdefault.jpg"},
+        {"title": "Chorégraphie cardio dance", "videoId": "oe7ekvC7P6k", "image": "https://i.ytimg.com/vi/oe7ekvC7P6k/mqdefault.jpg"},
+    ],
+    "Marche Active": [
+        {"title": "Marche Active Indoor 30min", "videoId": "vvkT5P3IiIo", "image": "https://i.ytimg.com/vi/vvkT5P3IiIo/mqdefault.jpg"},
+        {"title": "Walking Workout Cardio", "videoId": "R1W2rVy4I8M", "image": "https://i.ytimg.com/vi/R1W2rVy4I8M/mqdefault.jpg"},
+        {"title": "Marche rapide maison", "videoId": "Cuf3PIMXpCg", "image": "https://i.ytimg.com/vi/Cuf3PIMXpCg/mqdefault.jpg"},
+        {"title": "Walking indoor 20 minutes", "videoId": "Pk6T_M6R_ok", "image": "https://i.ytimg.com/vi/Pk6T_M6R_ok/mqdefault.jpg"},
+        {"title": "Marche sportive cardio", "videoId": "yPq9m_Ud91U", "image": "https://i.ytimg.com/vi/yPq9m_Ud91U/mqdefault.jpg"},
+        {"title": "Walking workout complet", "videoId": "e5gMdGU-T_Q", "image": "https://i.ytimg.com/vi/e5gMdGU-T_Q/mqdefault.jpg"},
+    ],
+}
+
+def obtener_videos_fallback(categoria: str):
+    """Retorna videos de respaldo verificados"""
+    videos_bruts = VIDEOS_FALLBACK.get(categoria, VIDEOS_FALLBACK["Cardio"])
+    videos = []
+    for v in videos_bruts:
+        videos.append({
+            "title": v["title"],
+            "image": v["image"],
+            "videoId": v["videoId"],
+            "link": f"https://www.youtube.com/watch?v={v['videoId']}",
+            "category": categoria
+        })
+    return videos
+
+def rechercher_videos_youtube(requete: str, categoria: str, max_results: int = 6):
+    """Busca videos en YouTube usando RapidAPI, con fallback a base local"""
+    url = f"https://yt-api.p.rapidapi.com/search?query={requete}&type=video"
+    headers = {
+        "x-rapidapi-key": "5bcfd3c0e4msh7db006c0824dd53ple3438jsn86c3ad93bfe8",
+        "x-rapidapi-host": "yt-api.p.rapidapi.com"
+    }
+    try:
+        rep = requests.get(url, headers=headers, timeout=10)
+        rep.raise_for_status()
+        data = rep.json()
+        videos = []
+        for item in data.get("data", [])[:max_results]:
+            thumbnail = item.get("thumbnail", [{}])
+            if isinstance(thumbnail, list) and len(thumbnail) > 0:
+                image_url = thumbnail[0].get("url", "")
+            else:
+                image_url = ""
+            videos.append({
+                "title": item.get("title", "Video"),
+                "image": image_url,
+                "videoId": item.get("videoId", ""),
+                "link": f"https://www.youtube.com/watch?v={item.get('videoId', '')}",
+                "category": categoria
+            })
+        if len(videos) > 0:
+            print(f" API: {len(videos)} videos obtenidos de RapidAPI")
+            return videos
+        else:
+            print(f" API retornó 0 videos, usando fallback")
+            return obtener_videos_fallback(categoria)
+    except Exception as e:
+        print(f" Error API: {e}, usando videos de fallback")
+        return obtener_videos_fallback(categoria)
+
+@app.get("/sports/recommendations")
+def recommandations_sportives(age: int = Query(...), poids: int = Query(...), objectif: str = Query(...)):
+    if age < 30:
+        categorie = "HIIT"
+        requete = "HIIT workout home"
+    elif 30 <= age < 55:
+        categorie = "Cardio"
+        requete = "cardio workout home"
+    else:
+        categorie = "Étirements"
+        requete = "stretching exercises"
+    if objectif == "Perte de poids":
+        categorie = "Cardio"
+        requete = "cardio weight loss"
+    elif objectif == "Gain de muscle":
+        categorie = "Musculation"
+        requete = "strength training home"
+    elif objectif == "Flexibilité":
+        categorie = "Yoga"
+        requete = "yoga flexibility"
+    videos = rechercher_videos_youtube(requete, categorie)
+    return {"categorie_recommandee": categorie, "videos": videos}
+
+@app.get("/sports/category")
+def videos_par_categorie(name: str = Query(...), age: int = Query(30), objectif: str = Query("Bien-être")):
+    mapping = {
+        "Yoga": "yoga debutant",
+        "Cardio": "cardio maison",
+        "HIIT": "hiit workout",
+        "Musculation": "musculation maison",
+        "Étirements": "etirements complets",
+        "Pilates": "pilates debutant",
+        "Danse Fitness": "danse fitness zumba",
+        "Marche Active": "marche active cardio",
+    }
+    requete = mapping.get(name, f"{name} workout")
+    videos = rechercher_videos_youtube(requete, name)
+    return {"categorie": name, "videos": videos}
+
+@app.get("/sports/health")
+def health_check():
+    return {"status": "ok", "service": "sports"}
