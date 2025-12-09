@@ -90,4 +90,13 @@ USERS_DATA = [
         "is_admin": True,
         "created_at": datetime(2024, 8, 1, 9, 0, 0)
     },
+    {
+        "id": 10,
+        "name": "Ana",
+        "email": "tecnologyana@gmail.com",
+        "password_hash": "$2b$12$rGlxuLQzRsi3lH28ECCL9uZHpts2QIcnoEz4wZraa.arKPCTr4sn6",
+        "is_active": True,
+        "is_admin": True,
+        "created_at": datetime(2025, 12, 6, 4, 44, 45)
+    },
 ]
